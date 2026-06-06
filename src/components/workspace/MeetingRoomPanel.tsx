@@ -382,8 +382,8 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   async function sendComposer() {
     if (!user || !composer.trim()) return;
     const body = composer.trim();
-    setComposer("");
     if (composerMode === "intro") {
+      setComposer("");
       await supabase.from("whiteboard_elements").insert({
         session_id: sessionId,
         type: "intro",
@@ -393,7 +393,34 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
         source: "user",
       });
       setRoleText("");
+    } else if (composerMode === "whisper") {
+      setComposer("");
+      await supabase.from("messages").insert({
+        session_id: sessionId,
+        user_id: user.id,
+        content: body,
+        kind: "anon_note",
+        is_anonymous: true,
+      });
+    } else if (composerMode === "poll") {
+      const opts = pollOptionsText.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 6);
+      if (opts.length < 2) {
+        toast.error("Add at least 2 options (one per line)");
+        return;
+      }
+      setComposer("");
+      const options: PollOption[] = opts.map((label, i) => ({ id: `o${i + 1}`, label }));
+      const { error } = await supabase.from("polls").insert({
+        session_id: sessionId,
+        question: body,
+        options,
+        created_by: user.id,
+        status: "open",
+      });
+      if (error) toast.error(error.message);
+      else setPollOptionsText("Yes\nNo");
     } else {
+      setComposer("");
       await supabase.from("messages").insert({
         session_id: sessionId,
         user_id: user.id,
@@ -402,6 +429,7 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
       });
     }
   }
+
 
   function defaultPositionFor(idx: number) {
     const cols = 4;
