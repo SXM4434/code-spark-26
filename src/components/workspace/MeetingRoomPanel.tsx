@@ -287,6 +287,48 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
           </div>
         </header>
 
+        <div className="mt-3 rounded-2xl border-2 border-dashed border-border bg-background/60 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className={`inline-block h-2.5 w-2.5 rounded-full ${listening ? "animate-pulse bg-destructive" : "bg-muted-foreground/40"}`} />
+              <span className="font-display text-sm font-semibold text-ink">
+                {listening ? `Listening · ${mmss(elapsed)}` : "Listen & record"}
+              </span>
+            </div>
+            <div className="flex gap-2">
+              {!listening ? (
+                <Button onClick={startListening} size="sm" className="doodle-btn rounded-full bg-primary">
+                  🎙️ Start
+                </Button>
+              ) : (
+                <Button onClick={stopListening} size="sm" variant="secondary" className="doodle-btn rounded-full">
+                  ⏹ Stop
+                </Button>
+              )}
+              {recordingUrl && !listening && (
+                <a
+                  href={recordingUrl}
+                  download={`meeting-${new Date().toISOString().slice(0, 16)}.webm`}
+                  className="doodle-btn rounded-full bg-card px-3 py-1 text-xs font-display font-semibold"
+                >
+                  ⬇ Recording
+                </a>
+              )}
+            </div>
+          </div>
+          {listening && (
+            <p className="mt-2 text-xs italic text-muted-foreground">
+              {liveText || "Waiting for someone to speak…"}
+            </p>
+          )}
+          {!sttSupported && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Live transcription works best in Chrome or Edge.
+            </p>
+          )}
+        </div>
+
+
         <div className="mt-3 flex-1 min-h-0 space-y-2 overflow-y-auto pr-1">
           {intros.length === 0 && (
             <div className="rounded-2xl border-2 border-dashed border-border p-6 text-center text-sm text-muted-foreground">
