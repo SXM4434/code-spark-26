@@ -11,6 +11,7 @@ import { VoiceGreeting } from "@/components/workspace/VoiceGreeting";
 import { WhiteboardPanel } from "@/components/workspace/WhiteboardPanel";
 import { PollsPanel } from "@/components/workspace/PollsPanel";
 import { MediatorStrip } from "@/components/workspace/MediatorStrip";
+import { MeetingRoomPanel } from "@/components/workspace/MeetingRoomPanel";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
@@ -33,7 +34,7 @@ const DEMO_LINES = [
   "Love that. Lower friction. We could measure conversion in a week.",
 ];
 
-type Tab = "chat" | "notes" | "board" | "polls";
+type Tab = "room" | "chat" | "notes" | "board" | "polls";
 
 function Workspace() {
   const { sessionId } = Route.useParams();
@@ -41,7 +42,7 @@ function Workspace() {
   const [session, setSession] = useState<Session | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [greeted, setGreeted] = useState(false);
-  const [tab, setTab] = useState<Tab>("chat");
+  const [tab, setTab] = useState<Tab>("room");
   const [wrapping, setWrapping] = useState(false);
 
   useEffect(() => {
@@ -145,6 +146,7 @@ function Workspace() {
   }
 
   const tabs: Array<{ id: Tab; label: string; icon: string }> = [
+    { id: "room", label: "Room", icon: "🪑" },
     { id: "chat", label: "Chat", icon: "💬" },
     { id: "notes", label: "Whispers", icon: "🤫" },
     { id: "board", label: "Whiteboard", icon: "🎨" },
@@ -201,6 +203,9 @@ function Workspace() {
               ))}
             </div>
             <div className="mt-3 flex-1 min-h-0">
+              {tab === "room" && (
+                <MeetingRoomPanel sessionId={sessionId} participants={participants} nameMap={nameMap} />
+              )}
               {tab === "chat" && <ChatPanel sessionId={sessionId} nameMap={nameMap} />}
               {tab === "notes" && <NotesPanel sessionId={sessionId} />}
               {tab === "board" && <WhiteboardPanel sessionId={sessionId} />}
