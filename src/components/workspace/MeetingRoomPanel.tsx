@@ -16,7 +16,16 @@ type Participant = {
 type WBElement = {
   id: string;
   type: string;
-  data: { text?: string; author?: string; role?: string };
+  data: {
+    text?: string;
+    author?: string;
+    role?: string;
+    stepId?: string;
+    kind?: string;
+    from?: string;
+    to?: string;
+    label?: string | null;
+  };
   position: { x?: number; y?: number } | null;
   created_at: string;
   created_by: string | null;
