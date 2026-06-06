@@ -43,7 +43,6 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   const [autoFlow, setAutoFlow] = useState(true);
   const [autoBusy, setAutoBusy] = useState(false);
   const introsEndRef = useRef<HTMLDivElement>(null);
-  const recognitionRef = useRef<any>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -53,18 +52,49 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   const lastSigRef = useRef<string>("");
   const [chatBeat, setChatBeat] = useState(0);
 
-  const sttSupported =
-    typeof window !== "undefined" &&
-    !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+  const userIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    userIdRef.current = user?.id ?? null;
+  }, [user?.id]);
+
+  const persistFinal = async (text: string) => {
+    const uid = userIdRef.current;
+    if (!uid || !text.trim()) return;
+    const author = nameMap[uid] ?? "Someone";
+    await supabase.from("whiteboard_elements").insert({
+      session_id: sessionId,
+      type: "intro",
+      data: { text: text.trim(), author, role: "spoken" },
+      position: { x: 0, y: 0 },
+      created_by: uid,
+      source: "user",
+    });
+  };
+
+  const scribe = useScribe({
+    modelId: "scribe_v2_realtime",
+    commitStrategy: "vad",
+    onPartialTranscript: (data: { text: string }) => {
+      setLiveText(data.text ?? "");
+    },
+    onCommittedTranscript: async (data: { text: string }) => {
+      setLiveText("");
+      await persistFinal(data.text ?? "");
+    },
+  });
 
   async function startListening() {
     if (!user) return;
-    if (!sttSupported) {
-      toast.error("Live transcription needs Chrome or Edge.");
-      return;
-    }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const tokenRes = await fetch("/api/elevenlabs/scribe-token", { method: "POST" });
+      if (!tokenRes.ok) throw new Error(`Token request failed: ${tokenRes.status}`);
+      const { token } = await tokenRes.json();
+      if (!token) throw new Error("No token received");
+
+      // Mirror the mic into a MediaRecorder so we can offer a downloadable file
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
       streamRef.current = stream;
       chunksRef.current = [];
       const recorder = new MediaRecorder(stream);
@@ -76,42 +106,10 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
       recorder.start(1000);
       recorderRef.current = recorder;
 
-      const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      const rec = new SR();
-      rec.continuous = true;
-      rec.interimResults = true;
-      rec.lang = "en-US";
-      rec.onresult = async (event: any) => {
-        let interim = "";
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const res = event.results[i];
-          const transcript = res[0].transcript.trim();
-          if (res.isFinal && transcript) {
-            const author = nameMap[user.id] ?? "Someone";
-            await supabase.from("whiteboard_elements").insert({
-              session_id: sessionId,
-              type: "intro",
-              data: { text: transcript, author, role: "spoken" },
-              position: { x: 0, y: 0 },
-              created_by: user.id,
-              source: "user",
-            });
-          } else {
-            interim += transcript + " ";
-          }
-        }
-        setLiveText(interim.trim());
-      };
-      rec.onerror = (e: any) => {
-        if (e.error !== "no-speech") toast.error(`Mic error: ${e.error}`);
-      };
-      rec.onend = () => {
-        if (recognitionRef.current === rec && listening) {
-          try { rec.start(); } catch { /* noop */ }
-        }
-      };
-      rec.start();
-      recognitionRef.current = rec;
+      await scribe.connect({
+        token,
+        microphone: { echoCancellation: true, noiseSuppression: true },
+      });
 
       startedAtRef.current = Date.now();
       setElapsed(0);
@@ -122,15 +120,15 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
       setListening(true);
       setRecordingUrl(null);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Couldn't access the mic");
+      toast.error(e instanceof Error ? e.message : "Couldn't start ElevenLabs transcription");
+      stopListening();
     }
   }
 
   function stopListening() {
     setListening(false);
     setLiveText("");
-    try { recognitionRef.current?.stop(); } catch { /* noop */ }
-    recognitionRef.current = null;
+    try { scribe.disconnect(); } catch { /* noop */ }
     try { recorderRef.current?.stop(); } catch { /* noop */ }
     recorderRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -143,11 +141,12 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
 
   useEffect(() => {
     return () => {
-      try { recognitionRef.current?.stop(); } catch { /* noop */ }
+      try { scribe.disconnect(); } catch { /* noop */ }
       try { recorderRef.current?.stop(); } catch { /* noop */ }
       streamRef.current?.getTracks().forEach((t) => t.stop());
       if (timerRef.current) clearInterval(timerRef.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function mmss(s: number) {
@@ -155,6 +154,7 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
     const ss = (s % 60).toString().padStart(2, "0");
     return `${m}:${ss}`;
   }
+
 
 
   useEffect(() => {
