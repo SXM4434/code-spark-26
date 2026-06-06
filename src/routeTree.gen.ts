@@ -14,6 +14,7 @@ import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedOnboardingRouteImport } from './routes/_authenticated/onboarding'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
+import { Route as ApiElevenlabsScribeTokenRouteImport } from './routes/api/elevenlabs/scribe-token'
 import { Route as AuthenticatedSessionsNewRouteImport } from './routes/_authenticated/sessions/new'
 import { Route as AuthenticatedSessionsSessionIdWrapRouteImport } from './routes/_authenticated/sessions/$sessionId/wrap'
 import { Route as AuthenticatedSessionsSessionIdWorkspaceRouteImport } from './routes/_authenticated/sessions/$sessionId/workspace'
@@ -43,6 +44,12 @@ const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const ApiElevenlabsScribeTokenRoute =
+  ApiElevenlabsScribeTokenRouteImport.update({
+    id: '/api/elevenlabs/scribe-token',
+    path: '/api/elevenlabs/scribe-token',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AuthenticatedSessionsNewRoute =
   AuthenticatedSessionsNewRouteImport.update({
     id: '/sessions/new',
@@ -74,6 +81,7 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/onboarding': typeof AuthenticatedOnboardingRoute
   '/sessions/new': typeof AuthenticatedSessionsNewRoute
+  '/api/elevenlabs/scribe-token': typeof ApiElevenlabsScribeTokenRoute
   '/sessions/$sessionId/lobby': typeof AuthenticatedSessionsSessionIdLobbyRoute
   '/sessions/$sessionId/workspace': typeof AuthenticatedSessionsSessionIdWorkspaceRoute
   '/sessions/$sessionId/wrap': typeof AuthenticatedSessionsSessionIdWrapRoute
@@ -84,6 +92,7 @@ export interface FileRoutesByTo {
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/onboarding': typeof AuthenticatedOnboardingRoute
   '/sessions/new': typeof AuthenticatedSessionsNewRoute
+  '/api/elevenlabs/scribe-token': typeof ApiElevenlabsScribeTokenRoute
   '/sessions/$sessionId/lobby': typeof AuthenticatedSessionsSessionIdLobbyRoute
   '/sessions/$sessionId/workspace': typeof AuthenticatedSessionsSessionIdWorkspaceRoute
   '/sessions/$sessionId/wrap': typeof AuthenticatedSessionsSessionIdWrapRoute
@@ -96,6 +105,7 @@ export interface FileRoutesById {
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/onboarding': typeof AuthenticatedOnboardingRoute
   '/_authenticated/sessions/new': typeof AuthenticatedSessionsNewRoute
+  '/api/elevenlabs/scribe-token': typeof ApiElevenlabsScribeTokenRoute
   '/_authenticated/sessions/$sessionId/lobby': typeof AuthenticatedSessionsSessionIdLobbyRoute
   '/_authenticated/sessions/$sessionId/workspace': typeof AuthenticatedSessionsSessionIdWorkspaceRoute
   '/_authenticated/sessions/$sessionId/wrap': typeof AuthenticatedSessionsSessionIdWrapRoute
@@ -108,6 +118,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/onboarding'
     | '/sessions/new'
+    | '/api/elevenlabs/scribe-token'
     | '/sessions/$sessionId/lobby'
     | '/sessions/$sessionId/workspace'
     | '/sessions/$sessionId/wrap'
@@ -118,6 +129,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/onboarding'
     | '/sessions/new'
+    | '/api/elevenlabs/scribe-token'
     | '/sessions/$sessionId/lobby'
     | '/sessions/$sessionId/workspace'
     | '/sessions/$sessionId/wrap'
@@ -129,6 +141,7 @@ export interface FileRouteTypes {
     | '/_authenticated/dashboard'
     | '/_authenticated/onboarding'
     | '/_authenticated/sessions/new'
+    | '/api/elevenlabs/scribe-token'
     | '/_authenticated/sessions/$sessionId/lobby'
     | '/_authenticated/sessions/$sessionId/workspace'
     | '/_authenticated/sessions/$sessionId/wrap'
@@ -138,6 +151,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  ApiElevenlabsScribeTokenRoute: typeof ApiElevenlabsScribeTokenRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -176,6 +190,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/dashboard'
       preLoaderRoute: typeof AuthenticatedDashboardRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/api/elevenlabs/scribe-token': {
+      id: '/api/elevenlabs/scribe-token'
+      path: '/api/elevenlabs/scribe-token'
+      fullPath: '/api/elevenlabs/scribe-token'
+      preLoaderRoute: typeof ApiElevenlabsScribeTokenRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_authenticated/sessions/new': {
       id: '/_authenticated/sessions/new'
@@ -236,17 +257,8 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  ApiElevenlabsScribeTokenRoute: ApiElevenlabsScribeTokenRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
