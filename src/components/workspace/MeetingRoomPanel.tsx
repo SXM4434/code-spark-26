@@ -39,6 +39,8 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   const [liveText, setLiveText] = useState("");
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [autoFlow, setAutoFlow] = useState(true);
+  const [autoBusy, setAutoBusy] = useState(false);
   const introsEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -46,6 +48,9 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<number | null>(null);
   const startedAtRef = useRef<number>(0);
+  const flowDebounceRef = useRef<number | null>(null);
+  const lastSigRef = useRef<string>("");
+  const [chatBeat, setChatBeat] = useState(0);
 
   const sttSupported =
     typeof window !== "undefined" &&
@@ -160,6 +165,11 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
         { event: "*", schema: "public", table: "whiteboard_elements", filter: `session_id=eq.${sessionId}` },
         () => load(),
       )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages", filter: `session_id=eq.${sessionId}` },
+        () => setChatBeat((b) => b + 1),
+      )
       .subscribe();
     return () => {
       supabase.removeChannel(ch);
@@ -170,6 +180,29 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   useEffect(() => {
     introsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [elements.length]);
+
+  // Auto-rebuild flow as the conversation evolves
+  useEffect(() => {
+    if (!autoFlow) return;
+    const introCount = elements.filter((e) => e.type === "intro").length;
+    if (introCount === 0 && chatBeat === 0) return;
+    const sig = `${introCount}:${chatBeat}`;
+    if (sig === lastSigRef.current) return;
+    if (flowDebounceRef.current) clearTimeout(flowDebounceRef.current);
+    flowDebounceRef.current = window.setTimeout(async () => {
+      lastSigRef.current = sig;
+      setAutoBusy(true);
+      try {
+        await suggestFlow(true);
+      } finally {
+        setAutoBusy(false);
+      }
+    }, 8000);
+    return () => {
+      if (flowDebounceRef.current) clearTimeout(flowDebounceRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [elements, chatBeat, autoFlow]);
 
   async function load() {
     const { data } = await supabase
@@ -213,22 +246,36 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
     await supabase.from("whiteboard_elements").delete().eq("id", id);
   }
 
-  async function suggestFlow() {
+  async function suggestFlow(silent = false) {
     if (!user) return;
-    setSuggesting(true);
+    if (!silent) setSuggesting(true);
     try {
       const intros = elements.filter((e) => e.type === "intro");
-      if (intros.length === 0) {
-        toast.error("Add a few intros first so Cartoonist has something to work with.");
+      const { data: msgs } = await supabase
+        .from("messages")
+        .select("content,kind,user_id,created_at")
+        .eq("session_id", sessionId)
+        .in("kind", ["chat", "voice"])
+        .order("created_at", { ascending: false })
+        .limit(40);
+
+      if (intros.length === 0 && (msgs?.length ?? 0) === 0) {
+        if (!silent) toast.error("Need some conversation first.");
         return;
       }
-      const context = intros
+
+      const introCtx = intros
         .map((i) => `${i.data.author ?? "Someone"}${i.data.role ? ` (${i.data.role})` : ""}: ${i.data.text}`)
         .join("\n");
+      const chatCtx = (msgs ?? [])
+        .reverse()
+        .map((m) => `${nameMap[m.user_id ?? ""] ?? "Someone"}: ${m.content}`)
+        .join("\n");
+
       const { data, error } = await supabase.functions.invoke("mediator", {
         body: {
           session_id: sessionId,
-          prompt: `Based on these team introductions, sketch a 4-6 step user flow that fits what they're building. Return ONLY a JSON array of short step strings.\n\nIntros:\n${context}`,
+          prompt: `You are sketching a live user flow that evolves as a team talks. Based on the intros and chat, return ONLY a JSON array of 4-7 short step strings (max 8 words each) describing the user journey of what they're building. No prose.\n\nIntros:\n${introCtx}\n\nConversation:\n${chatCtx}`,
           mode: "flow",
         },
       });
@@ -236,6 +283,18 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
       const raw = (data?.text ?? data?.response ?? "").toString();
       const match = raw.match(/\[[\s\S]*\]/);
       const steps: string[] = match ? JSON.parse(match[0]) : [];
+      if (steps.length === 0) return;
+
+      // Replace previous AI steps; keep user-added ones
+      const { data: existingAi } = await supabase
+        .from("whiteboard_elements")
+        .select("id")
+        .eq("session_id", sessionId)
+        .eq("type", "flow_step")
+        .eq("source", "ai");
+      if (existingAi?.length) {
+        await supabase.from("whiteboard_elements").delete().in("id", existingAi.map((r) => r.id));
+      }
       for (const step of steps.slice(0, 8)) {
         await supabase.from("whiteboard_elements").insert({
           session_id: sessionId,
@@ -246,13 +305,14 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
           source: "ai",
         });
       }
-      toast.success(`Cartoonist sketched ${steps.length} steps`);
+      if (!silent) toast.success(`Cartoonist sketched ${steps.length} steps`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Couldn't sketch the flow");
+      if (!silent) toast.error(e instanceof Error ? e.message : "Couldn't sketch the flow");
     } finally {
-      setSuggesting(false);
+      if (!silent) setSuggesting(false);
     }
   }
+
 
   const intros = elements.filter((e) => e.type === "intro");
   const flow = elements.filter((e) => e.type === "flow_step");
@@ -386,19 +446,37 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
 
       {/* RIGHT — User flow */}
       <section className="doodle-card flex h-full min-h-0 flex-col rounded-3xl bg-card p-4">
-        <header className="flex items-center justify-between">
+        <header className="flex items-center justify-between gap-2">
           <div>
             <h2 className="font-display text-lg font-bold text-ink">User flow · building in parallel</h2>
-            <p className="text-xs text-muted-foreground">Sketch the journey while folks are talking</p>
+            <p className="text-xs text-muted-foreground">
+              {autoFlow
+                ? autoBusy
+                  ? "Cartoonist is updating the flow…"
+                  : "Auto-sketching as the conversation unfolds"
+                : "Manual mode"}
+            </p>
           </div>
-          <Button
-            onClick={suggestFlow}
-            disabled={suggesting}
-            variant="secondary"
-            className="doodle-btn rounded-full"
-          >
-            {suggesting ? "Sketching…" : "✨ Sketch from intros"}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1.5 text-xs font-display text-ink">
+              <input
+                type="checkbox"
+                checked={autoFlow}
+                onChange={(e) => setAutoFlow(e.target.checked)}
+                className="h-4 w-4 accent-primary"
+              />
+              Auto
+            </label>
+            <Button
+              onClick={() => void suggestFlow(false)}
+              disabled={suggesting}
+              variant="secondary"
+              size="sm"
+              className="doodle-btn rounded-full"
+            >
+              {suggesting ? "Sketching…" : "✨ Sketch now"}
+            </Button>
+          </div>
         </header>
 
         <div className="mt-3 flex-1 min-h-0 space-y-2 overflow-y-auto pr-1">
