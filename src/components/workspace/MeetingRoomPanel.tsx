@@ -641,37 +641,90 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
               Say hi, type a message, or start listening.
             </p>
           )}
-          {feed.map((item) => (
-            <div key={item.id} className={`flex ${item.mine ? "justify-end" : "justify-start"}`}>
-              <div className={`max-w-[85%] rounded-lg border ${item.mine ? "border-border bg-background" : "border-border bg-background"} px-3 py-2`}>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] font-medium text-foreground">{item.author}</span>
-                  <span className={`rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-wider ${TAG_STYLES[item.tag]}`}>
-                    {TAG_LABELS[item.tag]}
-                  </span>
+          {feed.map((item) => {
+            if (item.tag === "poll" && item.poll) {
+              const p = item.poll;
+              const total = votes.filter((v) => v.poll_id === p.id).length || 1;
+              const myVote = votes.find((v) => v.poll_id === p.id && v.user_id === user?.id)?.option_id;
+              const canClose = p.created_by === user?.id && p.status === "open";
+              return (
+                <div key={item.id} className="flex justify-start">
+                  <div className="w-full max-w-[95%] rounded-lg border border-border bg-background px-3 py-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-medium text-foreground">{item.author}</span>
+                      <span className={`rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-wider ${TAG_STYLES.poll}`}>poll</span>
+                      <span className="ml-auto text-[10px] text-muted-foreground">{p.status}</span>
+                    </div>
+                    <p className="mt-0.5 text-[13px] font-medium text-foreground">{p.question}</p>
+                    <div className="mt-2 space-y-1">
+                      {p.options.map((o) => {
+                        const count = votes.filter((v) => v.poll_id === p.id && v.option_id === o.id).length;
+                        const pct = Math.round((count / total) * 100);
+                        const mine = myVote === o.id;
+                        return (
+                          <button
+                            key={o.id}
+                            disabled={p.status === "closed"}
+                            onClick={() => void votePoll(p.id, o.id)}
+                            className={`relative block w-full overflow-hidden rounded-md border px-2 py-1 text-left text-[12px] transition ${mine ? "border-foreground" : "border-border"} ${p.status === "closed" ? "opacity-70" : "hover:border-foreground/60"}`}
+                          >
+                            <div className="absolute inset-y-0 left-0 bg-cyan-500/15" style={{ width: `${pct}%` }} />
+                            <div className="relative flex items-center justify-between">
+                              <span>{mine ? "● " : ""}{o.label}</span>
+                              <span className="text-[10px] text-muted-foreground">{count} · {pct}%</span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {canClose && (
+                      <button
+                        onClick={() => void closePoll(p)}
+                        className="mt-1.5 text-[10px] text-muted-foreground hover:text-foreground"
+                      >
+                        Close poll
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <p className="mt-0.5 text-[13px] leading-snug text-foreground">{item.body}</p>
+              );
+            }
+            return (
+              <div key={item.id} className={`flex ${item.mine ? "justify-end" : "justify-start"}`}>
+                <div className={`max-w-[85%] rounded-lg border border-border bg-background px-3 py-2`}>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-medium text-foreground">{item.author}</span>
+                    <span className={`rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-wider ${TAG_STYLES[item.tag]}`}>
+                      {TAG_LABELS[item.tag]}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-[13px] leading-snug text-foreground">{item.body}</p>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
           <div ref={feedEndRef} />
         </div>
 
         {/* Composer */}
         <div className="space-y-2 border-t border-border px-4 py-3">
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setComposerMode("chat")}
-              className={`rounded-md px-2 py-1 text-[11px] ${composerMode === "chat" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
+          <div className="flex items-center gap-2">
+            <select
+              value={composerMode}
+              onChange={(e) => setComposerMode(e.target.value as typeof composerMode)}
+              className="h-7 rounded-md border border-border bg-background px-2 text-[11px] text-foreground outline-none"
             >
-              Chat
-            </button>
-            <button
-              onClick={() => setComposerMode("intro")}
-              className={`rounded-md px-2 py-1 text-[11px] ${composerMode === "intro" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              Intro
-            </button>
+              <option value="chat">💬 Chat</option>
+              <option value="intro">👋 Intro</option>
+              <option value="whisper">🤫 Whisper (anonymous)</option>
+              <option value="poll">📊 Poll</option>
+            </select>
+            <span className="text-[10px] text-muted-foreground">
+              {composerMode === "whisper" && "Nobody sees who sent it."}
+              {composerMode === "intro" && "Posted as your intro."}
+              {composerMode === "poll" && "Question + options below."}
+              {composerMode === "chat" && "Message the room."}
+            </span>
           </div>
           {composerMode === "intro" && (
             <Input
@@ -679,6 +732,15 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
               onChange={(e) => setRoleText(e.target.value)}
               placeholder="Your role (optional)"
               className="h-8 rounded-md text-xs"
+            />
+          )}
+          {composerMode === "poll" && (
+            <textarea
+              value={pollOptionsText}
+              onChange={(e) => setPollOptionsText(e.target.value)}
+              placeholder="One option per line"
+              rows={3}
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs outline-none"
             />
           )}
           <div className="flex gap-2">
@@ -691,10 +753,17 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
                   void sendComposer();
                 }
               }}
-              placeholder={composerMode === "intro" ? "Hi, I'm here to help with…" : "Message the room…"}
+              placeholder={
+                composerMode === "intro" ? "Hi, I'm here to help with…" :
+                composerMode === "whisper" ? "Whisper an idea anonymously…" :
+                composerMode === "poll" ? "Ask a question…" :
+                "Message the room…"
+              }
               className="h-9 rounded-md text-sm"
             />
-            <Button onClick={sendComposer} size="sm" className="h-9 rounded-md">Send</Button>
+            <Button onClick={sendComposer} size="sm" className="h-9 rounded-md">
+              {composerMode === "poll" ? "Post" : "Send"}
+            </Button>
           </div>
         </div>
       </section>
