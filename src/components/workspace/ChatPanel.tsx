@@ -58,6 +58,8 @@ export function ChatPanel({ sessionId, nameMap }: Props) {
     scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
 
+  const [pendingVoice, setPendingVoice] = useState(false);
+
   async function send(kind: "chat" | "voice", body: string) {
     if (!user || !body.trim()) return;
     await supabase.from("messages").insert({
@@ -73,15 +75,22 @@ export function ChatPanel({ sessionId, nameMap }: Props) {
     if (!text.trim()) return;
     const t = text;
     setText("");
-    await send("chat", t);
+    const wasVoice = pendingVoice;
+    setPendingVoice(false);
+    await send(wasVoice ? "voice" : "chat", t);
   }
 
   async function toggleVoice() {
     if (voice.listening) {
       voice.stop();
-      const t = voice.finalText.trim();
-      if (t) await send("voice", t);
-      voice.reset();
+      setTimeout(() => {
+        const t = voice.finalText.trim();
+        if (t) {
+          setText((prev) => (prev ? prev + " " : "") + t);
+          setPendingVoice(true);
+        }
+        voice.reset();
+      }, 250);
     } else {
       voice.start();
     }
@@ -133,6 +142,12 @@ export function ChatPanel({ sessionId, nameMap }: Props) {
       {voice.listening && (
         <div className="mt-2 rounded-xl border-2 border-dashed border-primary bg-card p-2 text-xs text-muted-foreground">
           🎙 Listening… <span className="text-ink">{voice.interim || voice.finalText}</span>
+          <div className="mt-1 text-[10px]">Tap ■ when done — you can edit before sending.</div>
+        </div>
+      )}
+      {pendingVoice && !voice.listening && (
+        <div className="mt-2 rounded-xl border-2 border-dashed border-accent bg-card/60 p-2 text-[11px] text-muted-foreground">
+          🎙 Captured from voice — edit below if anything's off, then hit Send.
         </div>
       )}
 
@@ -140,7 +155,7 @@ export function ChatPanel({ sessionId, nameMap }: Props) {
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Type a message…"
+          placeholder={pendingVoice ? "Edit your spoken message…" : "Type a message…"}
           className="sticker-sm flex-1 bg-card px-3 py-2 text-sm outline-none"
         />
         <Button type="button" variant="secondary" onClick={toggleVoice} className="doodle-btn rounded-full">
