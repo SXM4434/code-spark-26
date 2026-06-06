@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { AppHeader } from "@/components/AppHeader";
 import { Mascot } from "@/components/Mascot";
-import { ChatPanel } from "@/components/workspace/ChatPanel";
+
 import { NotesPanel } from "@/components/workspace/NotesPanel";
 import { ParticipantsList } from "@/components/workspace/ParticipantsList";
 import { VoiceGreeting } from "@/components/workspace/VoiceGreeting";
@@ -34,7 +34,7 @@ const DEMO_LINES = [
   "Love that. Lower friction. We could measure conversion in a week.",
 ];
 
-type Tab = "room" | "chat" | "notes" | "board" | "polls";
+type Tab = "room" | "notes" | "board" | "polls";
 
 function Workspace() {
   const { sessionId } = Route.useParams();
@@ -147,7 +147,6 @@ function Workspace() {
 
   const tabs: Array<{ id: Tab; label: string; icon: string }> = [
     { id: "room", label: "Room", icon: "🪑" },
-    { id: "chat", label: "Chat", icon: "💬" },
     { id: "notes", label: "Whispers", icon: "🤫" },
     { id: "board", label: "Whiteboard", icon: "🎨" },
     { id: "polls", label: "Polls", icon: "📊" },
@@ -208,7 +207,6 @@ function Workspace() {
                   <MeetingRoomPanel sessionId={sessionId} participants={participants} nameMap={nameMap} />
                 </ClientOnly>
               )}
-              {tab === "chat" && <ChatPanel sessionId={sessionId} nameMap={nameMap} />}
               {tab === "notes" && <NotesPanel sessionId={sessionId} />}
               {tab === "board" && <WhiteboardPanel sessionId={sessionId} />}
               {tab === "polls" && <PollsPanel sessionId={sessionId} />}

@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useScribe, CommitStrategy } from "@elevenlabs/react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
-import { Mascot } from "@/components/Mascot";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -14,13 +13,31 @@ type Participant = {
   online?: boolean;
 };
 
-type Element = {
+type WBElement = {
   id: string;
   type: string;
   data: { text?: string; author?: string; role?: string };
+  position: { x?: number; y?: number } | null;
   created_at: string;
   created_by: string | null;
   source: string;
+};
+
+type Msg = {
+  id: string;
+  user_id: string | null;
+  content: string;
+  kind: string;
+  created_at: string;
+};
+
+type FeedItem = {
+  id: string;
+  ts: string;
+  author: string;
+  body: string;
+  tag: "intro" | "spoken" | "chat" | "voice" | "mediator" | "system";
+  mine: boolean;
 };
 
 type Props = {
@@ -29,20 +46,45 @@ type Props = {
   nameMap: Record<string, string>;
 };
 
+const TAG_STYLES: Record<FeedItem["tag"], string> = {
+  intro: "bg-foreground/5 text-foreground border-foreground/10",
+  spoken: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20",
+  chat: "bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20",
+  voice: "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20",
+  mediator: "bg-violet-500/10 text-violet-700 dark:text-violet-300 border-violet-500/20",
+  system: "bg-muted text-muted-foreground border-border",
+};
+
+const TAG_LABELS: Record<FeedItem["tag"], string> = {
+  intro: "intro",
+  spoken: "spoken",
+  chat: "chat",
+  voice: "voice",
+  mediator: "mediator",
+  system: "system",
+};
+
+// Canvas sizing — generous virtual surface
+const CANVAS_W = 1600;
+const CANVAS_H = 1000;
+const NODE_W = 200;
+const NODE_H = 84;
+
 export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   const { user } = useAuth();
-  const [elements, setElements] = useState<Element[]>([]);
-  const [introText, setIntroText] = useState("");
+  const [elements, setElements] = useState<WBElement[]>([]);
+  const [messages, setMessages] = useState<Msg[]>([]);
+  const [composer, setComposer] = useState("");
+  const [composerMode, setComposerMode] = useState<"chat" | "intro">("chat");
   const [roleText, setRoleText] = useState("");
   const [flowText, setFlowText] = useState("");
   const [suggesting, setSuggesting] = useState(false);
   const [listening, setListening] = useState(false);
   const [liveText, setLiveText] = useState("");
-  const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [autoFlow, setAutoFlow] = useState(true);
   const [autoBusy, setAutoBusy] = useState(false);
-  const introsEndRef = useRef<HTMLDivElement>(null);
+  const feedEndRef = useRef<HTMLDivElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -50,14 +92,14 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   const startedAtRef = useRef<number>(0);
   const flowDebounceRef = useRef<number | null>(null);
   const lastSigRef = useRef<string>("");
-  const [chatBeat, setChatBeat] = useState(0);
 
   const userIdRef = useRef<string | null>(null);
   useEffect(() => {
     userIdRef.current = user?.id ?? null;
   }, [user?.id]);
 
-  const persistFinal = async (text: string) => {
+  // ---------- ElevenLabs Scribe ----------
+  const persistSpoken = async (text: string) => {
     const uid = userIdRef.current;
     if (!uid || !text.trim()) return;
     const author = nameMap[uid] ?? "Someone";
@@ -74,12 +116,10 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   const scribe = useScribe({
     modelId: "scribe_v2_realtime",
     commitStrategy: CommitStrategy.VAD,
-    onPartialTranscript: (data: { text: string }) => {
-      setLiveText(data.text ?? "");
-    },
+    onPartialTranscript: (data: { text: string }) => setLiveText(data.text ?? ""),
     onCommittedTranscript: async (data: { text: string }) => {
       setLiveText("");
-      await persistFinal(data.text ?? "");
+      await persistSpoken(data.text ?? "");
     },
   });
 
@@ -91,7 +131,6 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
       const { token } = await tokenRes.json();
       if (!token) throw new Error("No token received");
 
-      // Mirror the mic into a MediaRecorder so we can offer a downloadable file
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
@@ -99,10 +138,6 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
       chunksRef.current = [];
       const recorder = new MediaRecorder(stream);
       recorder.ondataavailable = (e) => e.data.size && chunksRef.current.push(e.data);
-      recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: chunksRef.current[0]?.type || "audio/webm" });
-        setRecordingUrl(URL.createObjectURL(blob));
-      };
       recorder.start(1000);
       recorderRef.current = recorder;
 
@@ -118,9 +153,8 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
         500,
       );
       setListening(true);
-      setRecordingUrl(null);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Couldn't start ElevenLabs transcription");
+      toast.error(e instanceof Error ? e.message : "Couldn't start transcription");
       stopListening();
     }
   }
@@ -133,10 +167,7 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
     recorderRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
   }
 
   useEffect(() => {
@@ -155,21 +186,53 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
     return `${m}:${ss}`;
   }
 
+  // ---------- Data load + realtime ----------
+  async function loadElements() {
+    const { data } = await supabase
+      .from("whiteboard_elements")
+      .select("id,type,data,position,created_at,created_by,source")
+      .eq("session_id", sessionId)
+      .in("type", ["intro", "flow_step"])
+      .order("created_at", { ascending: true });
+    setElements((data ?? []) as WBElement[]);
+  }
 
+  async function loadMessages() {
+    const { data } = await supabase
+      .from("messages")
+      .select("id,user_id,content,kind,created_at")
+      .eq("session_id", sessionId)
+      .in("kind", ["chat", "voice", "ai_mediator", "system"])
+      .order("created_at", { ascending: true });
+    setMessages((data ?? []) as Msg[]);
+  }
 
   useEffect(() => {
-    void load();
+    void loadElements();
+    void loadMessages();
     const ch = supabase
       .channel(`room:${sessionId}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "whiteboard_elements", filter: `session_id=eq.${sessionId}` },
-        () => load(),
+        (payload) => {
+          if (payload.eventType === "UPDATE" && payload.new) {
+            const next = payload.new as WBElement;
+            setElements((prev) => prev.map((el) => (el.id === next.id ? { ...el, ...next } : el)));
+          } else {
+            void loadElements();
+          }
+        },
       )
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "messages", filter: `session_id=eq.${sessionId}` },
-        () => setChatBeat((b) => b + 1),
+        (payload) => {
+          const m = payload.new as Msg;
+          if (["chat", "voice", "ai_mediator", "system"].includes(m.kind)) {
+            setMessages((prev) => [...prev, m]);
+          }
+        },
       )
       .subscribe();
     return () => {
@@ -178,66 +241,105 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
-  useEffect(() => {
-    introsEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [elements.length]);
+  // ---------- Unified feed ----------
+  const feed: FeedItem[] = useMemo(() => {
+    const intros: FeedItem[] = elements
+      .filter((e) => e.type === "intro")
+      .map((e) => {
+        const isSpoken = e.data.role === "spoken";
+        return {
+          id: `e-${e.id}`,
+          ts: e.created_at,
+          author: e.data.author ?? "Someone",
+          body: e.data.text ?? "",
+          tag: isSpoken ? "spoken" : "intro",
+          mine: e.created_by === user?.id,
+        };
+      });
 
-  // Auto-rebuild flow as the conversation evolves — sketch immediately, no waiting
+    const msgs: FeedItem[] = messages.map((m) => {
+      const tag: FeedItem["tag"] =
+        m.kind === "ai_mediator" ? "mediator" :
+        m.kind === "system" ? "system" :
+        m.kind === "voice" ? "voice" : "chat";
+      const author =
+        tag === "mediator" ? "Mediator" :
+        tag === "system" ? "system" :
+        nameMap[m.user_id ?? ""] ?? "Someone";
+      return {
+        id: `m-${m.id}`,
+        ts: m.created_at,
+        author,
+        body: m.content,
+        tag,
+        mine: m.user_id === user?.id,
+      };
+    });
+
+    return [...intros, ...msgs].sort((a, b) => a.ts.localeCompare(b.ts));
+  }, [elements, messages, nameMap, user?.id]);
+
+  useEffect(() => {
+    feedEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [feed.length]);
+
+  // ---------- Auto flow ----------
   useEffect(() => {
     if (!autoFlow) return;
-    const introCount = elements.filter((e) => e.type === "intro").length;
-    if (introCount === 0 && chatBeat === 0) return;
-    const sig = `${introCount}:${chatBeat}`;
+    const introCount = feed.filter((f) => f.tag === "intro" || f.tag === "spoken").length;
+    const chatCount = feed.filter((f) => f.tag === "chat" || f.tag === "voice").length;
+    if (introCount + chatCount === 0) return;
+    const sig = `${introCount}:${chatCount}`;
     if (sig === lastSigRef.current) return;
     if (flowDebounceRef.current) clearTimeout(flowDebounceRef.current);
-    // Tiny debounce just to coalesce rapid transcript chunks; feels live
     flowDebounceRef.current = window.setTimeout(async () => {
       lastSigRef.current = sig;
       setAutoBusy(true);
-      try {
-        await suggestFlow(true);
-      } finally {
-        setAutoBusy(false);
-      }
+      try { await suggestFlow(true); } finally { setAutoBusy(false); }
     }, 800);
-    return () => {
-      if (flowDebounceRef.current) clearTimeout(flowDebounceRef.current);
-    };
+    return () => { if (flowDebounceRef.current) clearTimeout(flowDebounceRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [elements, chatBeat, autoFlow]);
+  }, [feed, autoFlow]);
 
-  async function load() {
-    const { data } = await supabase
-      .from("whiteboard_elements")
-      .select("id,type,data,created_at,created_by,source")
-      .eq("session_id", sessionId)
-      .in("type", ["intro", "flow_step"])
-      .order("created_at", { ascending: true });
-    setElements((data ?? []) as Element[]);
+  // ---------- Actions ----------
+  async function sendComposer() {
+    if (!user || !composer.trim()) return;
+    const body = composer.trim();
+    setComposer("");
+    if (composerMode === "intro") {
+      await supabase.from("whiteboard_elements").insert({
+        session_id: sessionId,
+        type: "intro",
+        data: { text: body, author: nameMap[user.id] ?? "Someone", role: roleText.trim() || null },
+        position: { x: 0, y: 0 },
+        created_by: user.id,
+        source: "user",
+      });
+      setRoleText("");
+    } else {
+      await supabase.from("messages").insert({
+        session_id: sessionId,
+        user_id: user.id,
+        content: body,
+        kind: "chat",
+      });
+    }
   }
 
-  async function postIntro() {
-    if (!user || !introText.trim()) return;
-    const author = nameMap[user.id] ?? "Someone";
-    await supabase.from("whiteboard_elements").insert({
-      session_id: sessionId,
-      type: "intro",
-      data: { text: introText.trim(), author, role: roleText.trim() || null },
-      position: { x: 0, y: 0 },
-      created_by: user.id,
-      source: "user",
-    });
-    setIntroText("");
-    setRoleText("");
+  function defaultPositionFor(idx: number) {
+    const cols = 4;
+    const gx = 60, gy = 60, sx = 260, sy = 140;
+    return { x: gx + (idx % cols) * sx, y: gy + Math.floor(idx / cols) * sy };
   }
 
   async function addFlowStep() {
     if (!user || !flowText.trim()) return;
+    const flowCount = elements.filter((e) => e.type === "flow_step").length;
     await supabase.from("whiteboard_elements").insert({
       session_id: sessionId,
       type: "flow_step",
       data: { text: flowText.trim(), author: nameMap[user.id] ?? "Someone" },
-      position: { x: 0, y: 0 },
+      position: defaultPositionFor(flowCount),
       created_by: user.id,
       source: "user",
     });
@@ -246,6 +348,11 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
 
   async function removeElement(id: string) {
     await supabase.from("whiteboard_elements").delete().eq("id", id);
+  }
+
+  async function updateNodePosition(id: string, pos: { x: number; y: number }) {
+    setElements((prev) => prev.map((el) => (el.id === id ? { ...el, position: pos } : el)));
+    await supabase.from("whiteboard_elements").update({ position: pos }).eq("id", id);
   }
 
   async function suggestFlow(silent = false) {
@@ -287,7 +394,6 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
       const steps: string[] = match ? JSON.parse(match[0]) : [];
       if (steps.length === 0) return;
 
-      // Replace previous AI steps; keep user-added ones
       const { data: existingAi } = await supabase
         .from("whiteboard_elements")
         .select("id")
@@ -297,17 +403,18 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
       if (existingAi?.length) {
         await supabase.from("whiteboard_elements").delete().in("id", existingAi.map((r) => r.id));
       }
-      for (const step of steps.slice(0, 8)) {
+      const existingUserFlow = elements.filter((e) => e.type === "flow_step" && e.source !== "ai").length;
+      for (let i = 0; i < Math.min(steps.length, 8); i++) {
         await supabase.from("whiteboard_elements").insert({
           session_id: sessionId,
           type: "flow_step",
-          data: { text: step, author: "Cartoonist" },
-          position: { x: 0, y: 0 },
+          data: { text: steps[i], author: "Mediator" },
+          position: defaultPositionFor(existingUserFlow + i),
           created_by: user.id,
           source: "ai",
         });
       }
-      if (!silent) toast.success(`Cartoonist sketched ${steps.length} steps`);
+      if (!silent) toast.success(`Sketched ${steps.length} steps`);
     } catch (e) {
       if (!silent) toast.error(e instanceof Error ? e.message : "Couldn't sketch the flow");
     } finally {
@@ -315,207 +422,234 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
     }
   }
 
-
-  const intros = elements.filter((e) => e.type === "intro");
   const flow = elements.filter((e) => e.type === "flow_step");
 
+  // ---------- Canvas drag ----------
+  function NodeCard({ el, idx }: { el: WBElement; idx: number }) {
+    const fallback = defaultPositionFor(idx);
+    const x = el.position?.x ?? fallback.x;
+    const y = el.position?.y ?? fallback.y;
+    const dragOffset = useRef<{ dx: number; dy: number } | null>(null);
+    const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
+    const cur = dragPos ?? { x, y };
+
+    function onPointerDown(e: React.PointerEvent) {
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      dragOffset.current = { dx: e.clientX - cur.x, dy: e.clientY - cur.y };
+      setDragPos(cur);
+    }
+    function onPointerMove(e: React.PointerEvent) {
+      if (!dragOffset.current) return;
+      const nx = Math.max(0, Math.min(CANVAS_W - NODE_W, e.clientX - dragOffset.current.dx));
+      const ny = Math.max(0, Math.min(CANVAS_H - NODE_H, e.clientY - dragOffset.current.dy));
+      setDragPos({ x: nx, y: ny });
+    }
+    function onPointerUp() {
+      if (dragPos) void updateNodePosition(el.id, dragPos);
+      dragOffset.current = null;
+      setDragPos(null);
+    }
+
+    const isAI = el.source === "ai";
+    return (
+      <div
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        style={{ left: cur.x, top: cur.y, width: NODE_W, minHeight: NODE_H }}
+        className={`group absolute cursor-grab active:cursor-grabbing select-none rounded-lg border bg-card p-3 shadow-sm transition-shadow hover:shadow-md ${
+          isAI ? "border-violet-500/30" : "border-border"
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-foreground/5 text-[10px] font-semibold text-foreground">
+            {idx + 1}
+          </span>
+          <span className={`rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-wider ${isAI ? TAG_STYLES.mediator : "border-border bg-background text-muted-foreground"}`}>
+            {isAI ? "ai" : "team"}
+          </span>
+          {(el.created_by === user?.id || isAI) && (
+            <button
+              onClick={(e) => { e.stopPropagation(); void removeElement(el.id); }}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="opacity-0 transition group-hover:opacity-100 text-xs text-muted-foreground hover:text-destructive"
+            >
+              ×
+            </button>
+          )}
+        </div>
+        <p className="mt-1.5 text-[13px] leading-snug text-foreground">{el.data.text}</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="grid h-full gap-4 lg:grid-cols-2">
-      {/* LEFT — Room & intros */}
-      <section className="doodle-card flex h-full min-h-0 flex-col rounded-3xl bg-card p-4">
-        <header className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Mascot size={36} mood="happy" />
-            <div>
-              <h2 className="font-display text-lg font-bold text-ink">In the room</h2>
-              <p className="text-xs text-muted-foreground">{participants.length} here · introductions captured live</p>
-            </div>
+    <div className="grid h-full gap-4 lg:grid-cols-[minmax(340px,420px)_1fr]">
+      {/* LEFT — Room (intros + chat merged) */}
+      <section className="flex h-full min-h-0 flex-col rounded-2xl border border-border bg-card">
+        <header className="flex items-center justify-between border-b border-border px-4 py-3">
+          <div>
+            <h2 className="text-sm font-semibold tracking-tight text-foreground">Room</h2>
+            <p className="text-xs text-muted-foreground">{participants.length} here · everything in one thread</p>
           </div>
-          <div className="flex -space-x-2">
-            {participants.slice(0, 6).map((p) => (
+          <div className="flex -space-x-1.5">
+            {participants.slice(0, 5).map((p) => (
               <div
                 key={p.user_id}
                 title={p.display_name ?? "Someone"}
-                className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-card bg-accent font-display text-xs font-bold text-ink"
+                className="flex h-7 w-7 items-center justify-center rounded-full border border-card bg-muted text-[11px] font-medium text-foreground"
               >
                 {(p.display_name ?? "?").slice(0, 1).toUpperCase()}
               </div>
             ))}
-            {participants.length > 6 && (
-              <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-card bg-muted text-xs font-semibold">
-                +{participants.length - 6}
+            {participants.length > 5 && (
+              <div className="flex h-7 w-7 items-center justify-center rounded-full border border-card bg-muted text-[10px] text-muted-foreground">
+                +{participants.length - 5}
               </div>
             )}
           </div>
         </header>
 
-        <div className="mt-3 rounded-2xl border-2 border-dashed border-border bg-background/60 p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <span className={`inline-block h-2.5 w-2.5 rounded-full ${listening ? "animate-pulse bg-destructive" : "bg-muted-foreground/40"}`} />
-              <span className="font-display text-sm font-semibold text-ink">
-                {listening ? `Listening · ${mmss(elapsed)}` : "Listen & record"}
-              </span>
-            </div>
-            <div className="flex gap-2">
-              {!listening ? (
-                <Button onClick={startListening} size="sm" className="doodle-btn rounded-full bg-primary">
-                  🎙️ Start
-                </Button>
-              ) : (
-                <Button onClick={stopListening} size="sm" variant="secondary" className="doodle-btn rounded-full">
-                  ⏹ Stop
-                </Button>
-              )}
-              {recordingUrl && !listening && (
-                <a
-                  href={recordingUrl}
-                  download={`meeting-${new Date().toISOString().slice(0, 16)}.webm`}
-                  className="doodle-btn rounded-full bg-card px-3 py-1 text-xs font-display font-semibold"
-                >
-                  ⬇ Recording
-                </a>
-              )}
-            </div>
+        {/* Listen bar */}
+        <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2.5">
+          <div className="flex items-center gap-2">
+            <span className={`inline-block h-2 w-2 rounded-full ${listening ? "animate-pulse bg-emerald-500" : "bg-muted-foreground/30"}`} />
+            <span className="text-xs text-foreground">
+              {listening ? `Listening · ${mmss(elapsed)}` : "Live transcription"}
+            </span>
           </div>
-          {listening && (
-            <p className="mt-2 text-xs italic text-muted-foreground">
-              {liveText || "Waiting for someone to speak…"}
-            </p>
-          )}
-          {!listening && (
-            <p className="mt-2 text-xs text-muted-foreground">
-              Powered by ElevenLabs Scribe — high‑accuracy realtime transcription.
-            </p>
+          {!listening ? (
+            <Button onClick={startListening} size="sm" variant="outline" className="h-7 rounded-md text-xs">Start</Button>
+          ) : (
+            <Button onClick={stopListening} size="sm" variant="outline" className="h-7 rounded-md text-xs">Stop</Button>
           )}
         </div>
+        {listening && liveText && (
+          <p className="border-b border-border px-4 py-2 text-xs italic text-muted-foreground">{liveText}</p>
+        )}
 
-
-        <div className="mt-3 flex-1 min-h-0 space-y-2 overflow-y-auto pr-1">
-          {intros.length === 0 && (
-            <div className="rounded-2xl border-2 border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-              No intros yet. Be the first to say hi 👋
-            </div>
+        {/* Feed */}
+        <div className="flex-1 min-h-0 space-y-2 overflow-y-auto px-4 py-3">
+          {feed.length === 0 && (
+            <p className="py-10 text-center text-xs text-muted-foreground">
+              Say hi, type a message, or start listening.
+            </p>
           )}
-          {intros.map((el) => (
-            <div key={el.id} className="doodle-card group rounded-2xl bg-background p-3">
-              <div className="flex items-baseline justify-between gap-2">
-                <div className="font-display text-sm font-bold text-ink">
-                  {el.data.author ?? "Someone"}
-                  {el.data.role && <span className="ml-2 text-xs font-normal text-muted-foreground">· {el.data.role}</span>}
+          {feed.map((item) => (
+            <div key={item.id} className={`flex ${item.mine ? "justify-end" : "justify-start"}`}>
+              <div className={`max-w-[85%] rounded-lg border ${item.mine ? "border-border bg-background" : "border-border bg-background"} px-3 py-2`}>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] font-medium text-foreground">{item.author}</span>
+                  <span className={`rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-wider ${TAG_STYLES[item.tag]}`}>
+                    {TAG_LABELS[item.tag]}
+                  </span>
                 </div>
-                {el.created_by === user?.id && (
-                  <button
-                    onClick={() => removeElement(el.id)}
-                    className="opacity-0 transition group-hover:opacity-100 text-xs text-muted-foreground hover:text-destructive"
-                  >
-                    ✕
-                  </button>
-                )}
+                <p className="mt-0.5 text-[13px] leading-snug text-foreground">{item.body}</p>
               </div>
-              <p className="mt-1 text-sm text-ink/90">{el.data.text}</p>
             </div>
           ))}
-          <div ref={introsEndRef} />
+          <div ref={feedEndRef} />
         </div>
 
-        <div className="mt-3 space-y-2 border-t-2 border-dashed border-border pt-3">
-          <Input
-            value={roleText}
-            onChange={(e) => setRoleText(e.target.value)}
-            placeholder="Your role (e.g. Designer)"
-            className="rounded-full"
-          />
+        {/* Composer */}
+        <div className="space-y-2 border-t border-border px-4 py-3">
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setComposerMode("chat")}
+              className={`rounded-md px-2 py-1 text-[11px] ${composerMode === "chat" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              Chat
+            </button>
+            <button
+              onClick={() => setComposerMode("intro")}
+              className={`rounded-md px-2 py-1 text-[11px] ${composerMode === "intro" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              Intro
+            </button>
+          </div>
+          {composerMode === "intro" && (
+            <Input
+              value={roleText}
+              onChange={(e) => setRoleText(e.target.value)}
+              placeholder="Your role (optional)"
+              className="h-8 rounded-md text-xs"
+            />
+          )}
           <div className="flex gap-2">
             <Input
-              value={introText}
-              onChange={(e) => setIntroText(e.target.value)}
+              value={composer}
+              onChange={(e) => setComposer(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
-                  void postIntro();
+                  void sendComposer();
                 }
               }}
-              placeholder="Hi, I'm here to help with…"
-              className="rounded-full"
+              placeholder={composerMode === "intro" ? "Hi, I'm here to help with…" : "Message the room…"}
+              className="h-9 rounded-md text-sm"
             />
-            <Button onClick={postIntro} className="doodle-btn rounded-full bg-primary">
-              Introduce
-            </Button>
+            <Button onClick={sendComposer} size="sm" className="h-9 rounded-md">Send</Button>
           </div>
         </div>
       </section>
 
-      {/* RIGHT — User flow */}
-      <section className="doodle-card flex h-full min-h-0 flex-col rounded-3xl bg-card p-4">
-        <header className="flex items-center justify-between gap-2">
+      {/* RIGHT — Collaborative flow canvas */}
+      <section className="flex h-full min-h-0 flex-col rounded-2xl border border-border bg-card">
+        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
           <div>
-            <h2 className="font-display text-lg font-bold text-ink">User flow · building in parallel</h2>
+            <h2 className="text-sm font-semibold tracking-tight text-foreground">Flow canvas</h2>
             <p className="text-xs text-muted-foreground">
-              {autoFlow
-                ? autoBusy
-                  ? "Cartoonist is updating the flow…"
-                  : "Auto-sketching as the conversation unfolds"
-                : "Manual mode"}
+              {autoFlow ? (autoBusy ? "Updating from the conversation…" : "Auto-sketching · drag to arrange together") : "Manual mode · drag to arrange together"}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <label className="flex items-center gap-1.5 text-xs font-display text-ink">
+            <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
               <input
                 type="checkbox"
                 checked={autoFlow}
                 onChange={(e) => setAutoFlow(e.target.checked)}
-                className="h-4 w-4 accent-primary"
+                className="h-3.5 w-3.5 accent-foreground"
               />
               Auto
             </label>
             <Button
               onClick={() => void suggestFlow(false)}
               disabled={suggesting}
-              variant="secondary"
               size="sm"
-              className="doodle-btn rounded-full"
+              variant="outline"
+              className="h-7 rounded-md text-xs"
             >
-              {suggesting ? "Sketching…" : "✨ Sketch now"}
+              {suggesting ? "Sketching…" : "Sketch now"}
             </Button>
           </div>
         </header>
 
-        <div className="mt-3 flex-1 min-h-0 space-y-2 overflow-y-auto pr-1">
-          {flow.length === 0 && (
-            <div className="rounded-2xl border-2 border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-              No steps yet. Add the first one, or let Cartoonist sketch from intros.
-            </div>
-          )}
-          {flow.map((el, idx) => (
-            <div
-              key={el.id}
-              className={`doodle-card group flex items-center gap-3 rounded-2xl p-3 ${
-                el.source === "ai" ? "bg-secondary/40" : "bg-background"
-              }`}
-            >
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary font-display text-sm font-bold text-primary-foreground">
-                {idx + 1}
-              </div>
-              <div className="flex-1">
-                <p className="text-sm text-ink">{el.data.text}</p>
-                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  {el.source === "ai" ? "Cartoonist" : el.data.author ?? "Team"}
+        <div className="flex-1 min-h-0 overflow-auto">
+          <div
+            className="relative"
+            style={{
+              width: CANVAS_W,
+              height: CANVAS_H,
+              backgroundImage:
+                "radial-gradient(circle, hsl(var(--border)) 1px, transparent 1px)",
+              backgroundSize: "24px 24px",
+            }}
+          >
+            {flow.length === 0 && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <p className="text-xs text-muted-foreground">
+                  Empty canvas. Add a step below or let the conversation fill it.
                 </p>
               </div>
-              {(el.created_by === user?.id || el.source === "ai") && (
-                <button
-                  onClick={() => removeElement(el.id)}
-                  className="opacity-0 transition group-hover:opacity-100 text-xs text-muted-foreground hover:text-destructive"
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-          ))}
+            )}
+            {flow.map((el, idx) => (
+              <NodeCard key={el.id} el={el} idx={idx} />
+            ))}
+          </div>
         </div>
 
-        <div className="mt-3 flex gap-2 border-t-2 border-dashed border-border pt-3">
+        <div className="flex gap-2 border-t border-border px-4 py-3">
           <Input
             value={flowText}
             onChange={(e) => setFlowText(e.target.value)}
@@ -525,12 +659,10 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
                 void addFlowStep();
               }
             }}
-            placeholder="e.g. User lands on homepage and sees…"
-            className="rounded-full"
+            placeholder="Add a step to the canvas…"
+            className="h-9 rounded-md text-sm"
           />
-          <Button onClick={addFlowStep} className="doodle-btn rounded-full bg-primary">
-            Add step
-          </Button>
+          <Button onClick={addFlowStep} size="sm" className="h-9 rounded-md">Add</Button>
         </div>
       </section>
     </div>
