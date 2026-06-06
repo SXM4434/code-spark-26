@@ -68,6 +68,14 @@ function AuthPage() {
     if (result.error) toast.error("Google sign-in failed");
   }
 
+  async function handleSkip() {
+    setBusy(true);
+    const { error } = await supabase.auth.signInAnonymously();
+    setBusy(false);
+    if (error) toast.error(error.message);
+    else toast.success("You're in! Let's draw something.");
+  }
+
   return (
     <div className="min-h-screen bg-background px-4 py-10">
       <div className="mx-auto flex max-w-md flex-col items-center">
