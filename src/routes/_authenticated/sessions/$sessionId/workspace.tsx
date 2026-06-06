@@ -143,13 +143,6 @@ function Workspace() {
     );
   }
 
-  const tabs: Array<{ id: Tab; label: string; icon: string }> = [
-    { id: "room", label: "Room", icon: "🪑" },
-    { id: "notes", label: "Whispers", icon: "🤫" },
-    { id: "board", label: "Whiteboard", icon: "🎨" },
-    { id: "polls", label: "Polls", icon: "📊" },
-  ];
-
   return (
     <div className="min-h-screen bg-background">
       <AppHeader />
@@ -186,29 +179,10 @@ function Workspace() {
 
         <div className="mt-5 grid gap-4 lg:grid-cols-[260px_1fr]">
           <ParticipantsList participants={participants} />
-          <div className="flex h-[70vh] flex-col">
-            <div className="flex flex-wrap gap-2">
-              {tabs.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setTab(t.id)}
-                  className={`doodle-btn rounded-full px-4 py-1.5 font-display text-sm ${tab === t.id ? "bg-primary text-primary-foreground" : "bg-card"}`}
-                >
-                  <span className="mr-1">{t.icon}</span>
-                  {t.label}
-                </button>
-              ))}
-            </div>
-            <div className="mt-3 flex-1 min-h-0">
-              {tab === "room" && (
-                <ClientOnly fallback={<div className="h-full" />}>
-                  <MeetingRoomPanel sessionId={sessionId} participants={participants} nameMap={nameMap} />
-                </ClientOnly>
-              )}
-              {tab === "notes" && <NotesPanel sessionId={sessionId} />}
-              {tab === "board" && <WhiteboardPanel sessionId={sessionId} />}
-              {tab === "polls" && <PollsPanel sessionId={sessionId} />}
-            </div>
+          <div className="h-[78vh] min-h-0">
+            <ClientOnly fallback={<div className="h-full" />}>
+              <MeetingRoomPanel sessionId={sessionId} participants={participants} nameMap={nameMap} />
+            </ClientOnly>
           </div>
         </div>
       </main>
