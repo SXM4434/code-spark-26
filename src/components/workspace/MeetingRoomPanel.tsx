@@ -876,9 +876,6 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
             {flow.map((el, idx) => (
               <NodeCard key={el.id} el={el} idx={idx} />
             ))}
-          </div>
-        </div>
-
             {/* Arrows */}
             {(() => {
               const centers = nodeCenterByStepId();
@@ -908,7 +905,6 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
                     const dx = b.cx - a.cx;
                     const dy = b.cy - a.cy;
                     const len = Math.hypot(dx, dy) || 1;
-                    // Trim line so it ends at node edge (approx half NODE_W along the line)
                     const trim = NODE_W / 2 - 8;
                     const sx = a.cx + (dx / len) * trim;
                     const sy = a.cy + (dy / len) * (NODE_H / 2 - 4);
@@ -945,6 +941,7 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
             })()}
           </div>
         </div>
+
 
         <div className="flex gap-2 border-t border-border px-4 py-3">
           <Input
