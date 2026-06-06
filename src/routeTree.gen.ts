@@ -15,6 +15,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedOnboardingRouteImport } from './routes/_authenticated/onboarding'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedSessionsNewRouteImport } from './routes/_authenticated/sessions/new'
+import { Route as AuthenticatedSessionsSessionIdWrapRouteImport } from './routes/_authenticated/sessions/$sessionId/wrap'
 import { Route as AuthenticatedSessionsSessionIdWorkspaceRouteImport } from './routes/_authenticated/sessions/$sessionId/workspace'
 import { Route as AuthenticatedSessionsSessionIdLobbyRouteImport } from './routes/_authenticated/sessions/$sessionId/lobby'
 
@@ -48,6 +49,12 @@ const AuthenticatedSessionsNewRoute =
     path: '/sessions/new',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedSessionsSessionIdWrapRoute =
+  AuthenticatedSessionsSessionIdWrapRouteImport.update({
+    id: '/sessions/$sessionId/wrap',
+    path: '/sessions/$sessionId/wrap',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedSessionsSessionIdWorkspaceRoute =
   AuthenticatedSessionsSessionIdWorkspaceRouteImport.update({
     id: '/sessions/$sessionId/workspace',
@@ -69,6 +76,7 @@ export interface FileRoutesByFullPath {
   '/sessions/new': typeof AuthenticatedSessionsNewRoute
   '/sessions/$sessionId/lobby': typeof AuthenticatedSessionsSessionIdLobbyRoute
   '/sessions/$sessionId/workspace': typeof AuthenticatedSessionsSessionIdWorkspaceRoute
+  '/sessions/$sessionId/wrap': typeof AuthenticatedSessionsSessionIdWrapRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -78,6 +86,7 @@ export interface FileRoutesByTo {
   '/sessions/new': typeof AuthenticatedSessionsNewRoute
   '/sessions/$sessionId/lobby': typeof AuthenticatedSessionsSessionIdLobbyRoute
   '/sessions/$sessionId/workspace': typeof AuthenticatedSessionsSessionIdWorkspaceRoute
+  '/sessions/$sessionId/wrap': typeof AuthenticatedSessionsSessionIdWrapRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -89,6 +98,7 @@ export interface FileRoutesById {
   '/_authenticated/sessions/new': typeof AuthenticatedSessionsNewRoute
   '/_authenticated/sessions/$sessionId/lobby': typeof AuthenticatedSessionsSessionIdLobbyRoute
   '/_authenticated/sessions/$sessionId/workspace': typeof AuthenticatedSessionsSessionIdWorkspaceRoute
+  '/_authenticated/sessions/$sessionId/wrap': typeof AuthenticatedSessionsSessionIdWrapRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -100,6 +110,7 @@ export interface FileRouteTypes {
     | '/sessions/new'
     | '/sessions/$sessionId/lobby'
     | '/sessions/$sessionId/workspace'
+    | '/sessions/$sessionId/wrap'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -109,6 +120,7 @@ export interface FileRouteTypes {
     | '/sessions/new'
     | '/sessions/$sessionId/lobby'
     | '/sessions/$sessionId/workspace'
+    | '/sessions/$sessionId/wrap'
   id:
     | '__root__'
     | '/'
@@ -119,6 +131,7 @@ export interface FileRouteTypes {
     | '/_authenticated/sessions/new'
     | '/_authenticated/sessions/$sessionId/lobby'
     | '/_authenticated/sessions/$sessionId/workspace'
+    | '/_authenticated/sessions/$sessionId/wrap'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -171,6 +184,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSessionsNewRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/sessions/$sessionId/wrap': {
+      id: '/_authenticated/sessions/$sessionId/wrap'
+      path: '/sessions/$sessionId/wrap'
+      fullPath: '/sessions/$sessionId/wrap'
+      preLoaderRoute: typeof AuthenticatedSessionsSessionIdWrapRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/sessions/$sessionId/workspace': {
       id: '/_authenticated/sessions/$sessionId/workspace'
       path: '/sessions/$sessionId/workspace'
@@ -194,6 +214,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedSessionsNewRoute: typeof AuthenticatedSessionsNewRoute
   AuthenticatedSessionsSessionIdLobbyRoute: typeof AuthenticatedSessionsSessionIdLobbyRoute
   AuthenticatedSessionsSessionIdWorkspaceRoute: typeof AuthenticatedSessionsSessionIdWorkspaceRoute
+  AuthenticatedSessionsSessionIdWrapRoute: typeof AuthenticatedSessionsSessionIdWrapRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
@@ -204,6 +225,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
     AuthenticatedSessionsSessionIdLobbyRoute,
   AuthenticatedSessionsSessionIdWorkspaceRoute:
     AuthenticatedSessionsSessionIdWorkspaceRoute,
+  AuthenticatedSessionsSessionIdWrapRoute:
+    AuthenticatedSessionsSessionIdWrapRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =

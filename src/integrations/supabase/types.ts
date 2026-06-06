@@ -65,6 +65,7 @@ export type Database = {
           id: string
           kind: string
           session_id: string
+          updated_at: string
           version: number
         }
         Insert: {
@@ -73,6 +74,7 @@ export type Database = {
           id?: string
           kind: string
           session_id: string
+          updated_at?: string
           version?: number
         }
         Update: {
@@ -81,6 +83,7 @@ export type Database = {
           id?: string
           kind?: string
           session_id?: string
+          updated_at?: string
           version?: number
         }
         Relationships: [
