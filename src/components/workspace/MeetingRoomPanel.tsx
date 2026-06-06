@@ -446,19 +446,37 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
 
       {/* RIGHT — User flow */}
       <section className="doodle-card flex h-full min-h-0 flex-col rounded-3xl bg-card p-4">
-        <header className="flex items-center justify-between">
+        <header className="flex items-center justify-between gap-2">
           <div>
             <h2 className="font-display text-lg font-bold text-ink">User flow · building in parallel</h2>
-            <p className="text-xs text-muted-foreground">Sketch the journey while folks are talking</p>
+            <p className="text-xs text-muted-foreground">
+              {autoFlow
+                ? autoBusy
+                  ? "Cartoonist is updating the flow…"
+                  : "Auto-sketching as the conversation unfolds"
+                : "Manual mode"}
+            </p>
           </div>
-          <Button
-            onClick={suggestFlow}
-            disabled={suggesting}
-            variant="secondary"
-            className="doodle-btn rounded-full"
-          >
-            {suggesting ? "Sketching…" : "✨ Sketch from intros"}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1.5 text-xs font-display text-ink">
+              <input
+                type="checkbox"
+                checked={autoFlow}
+                onChange={(e) => setAutoFlow(e.target.checked)}
+                className="h-4 w-4 accent-primary"
+              />
+              Auto
+            </label>
+            <Button
+              onClick={() => void suggestFlow(false)}
+              disabled={suggesting}
+              variant="secondary"
+              size="sm"
+              className="doodle-btn rounded-full"
+            >
+              {suggesting ? "Sketching…" : "✨ Sketch now"}
+            </Button>
+          </div>
         </header>
 
         <div className="mt-3 flex-1 min-h-0 space-y-2 overflow-y-auto pr-1">
