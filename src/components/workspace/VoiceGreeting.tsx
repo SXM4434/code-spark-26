@@ -61,39 +61,32 @@ export function VoiceGreeting({ sessionId, participants, onDone }: Props) {
       setError("Type or say something so I know who you are.");
       return;
     }
-    const me = participants.find((p) => p.user_id === user?.id);
-    const match = bestMatch(said, participants);
-    const ok = match && (!me || match.user_id === me.user_id);
-    if (!ok) {
-      setError(
-        match
-          ? `That sounded like ${match.display_name}, but you're signed in as ${me?.display_name ?? "yourself"}. Fix the text and try again.`
-          : "I couldn't find your name in that. Try: \"Hi, I'm <your name> — and here's what I want to work on…\"",
-      );
-      return;
-    }
     setError(null);
-    setMatched(match);
+    const match = bestMatch(said, participants);
+    if (match) setMatched(match);
     setSubmitting(true);
-    // Save the greeting
-    await supabase.from("messages").insert({
-      session_id: sessionId,
-      user_id: user!.id,
-      content: `👋 ${said}`,
-      kind: "voice",
-    });
-    // If they said more than just their name, save it as an opening "instructions" note
-    const nameToks = new Set(tokenize(match.display_name ?? ""));
-    const extra = tokenize(said).filter((t) => !nameToks.has(t) && !["hi", "hey", "hello", "im", "i", "am", "this", "is"].includes(t));
-    if (extra.length >= 3) {
+    if (user) {
       await supabase.from("messages").insert({
         session_id: sessionId,
-        user_id: user!.id,
-        content: said,
-        kind: "system",
+        user_id: user.id,
+        content: `👋 ${said}`,
+        kind: "voice",
       });
+      // Save anything beyond the greeting as an opening instruction
+      const nameToks = new Set(tokenize(match?.display_name ?? ""));
+      const extra = tokenize(said).filter(
+        (t) => !nameToks.has(t) && !["hi", "hey", "hello", "im", "i", "am", "this", "is"].includes(t),
+      );
+      if (extra.length >= 3) {
+        await supabase.from("messages").insert({
+          session_id: sessionId,
+          user_id: user.id,
+          content: said,
+          kind: "system",
+        });
+      }
     }
-    setTimeout(onDone, 700);
+    setTimeout(onDone, 600);
   }
 
   if (!voice.supported) {
