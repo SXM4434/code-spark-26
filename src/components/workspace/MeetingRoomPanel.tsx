@@ -383,9 +383,9 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
               {liveText || "Waiting for someone to speak…"}
             </p>
           )}
-          {!sttSupported && (
+          {!listening && (
             <p className="mt-2 text-xs text-muted-foreground">
-              Live transcription works best in Chrome or Edge.
+              Powered by ElevenLabs Scribe — high‑accuracy realtime transcription.
             </p>
           )}
         </div>
