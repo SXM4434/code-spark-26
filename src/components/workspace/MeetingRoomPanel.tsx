@@ -35,7 +35,121 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   const [roleText, setRoleText] = useState("");
   const [flowText, setFlowText] = useState("");
   const [suggesting, setSuggesting] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [liveText, setLiveText] = useState("");
+  const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
+  const [elapsed, setElapsed] = useState(0);
   const introsEndRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<any>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<number | null>(null);
+  const startedAtRef = useRef<number>(0);
+
+  const sttSupported =
+    typeof window !== "undefined" &&
+    !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+
+  async function startListening() {
+    if (!user) return;
+    if (!sttSupported) {
+      toast.error("Live transcription needs Chrome or Edge.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      chunksRef.current = [];
+      const recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = (e) => e.data.size && chunksRef.current.push(e.data);
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: chunksRef.current[0]?.type || "audio/webm" });
+        setRecordingUrl(URL.createObjectURL(blob));
+      };
+      recorder.start(1000);
+      recorderRef.current = recorder;
+
+      const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      const rec = new SR();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = "en-US";
+      rec.onresult = async (event: any) => {
+        let interim = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const res = event.results[i];
+          const transcript = res[0].transcript.trim();
+          if (res.isFinal && transcript) {
+            const author = nameMap[user.id] ?? "Someone";
+            await supabase.from("whiteboard_elements").insert({
+              session_id: sessionId,
+              type: "intro",
+              data: { text: transcript, author, role: "spoken" },
+              position: { x: 0, y: 0 },
+              created_by: user.id,
+              source: "user",
+            });
+          } else {
+            interim += transcript + " ";
+          }
+        }
+        setLiveText(interim.trim());
+      };
+      rec.onerror = (e: any) => {
+        if (e.error !== "no-speech") toast.error(`Mic error: ${e.error}`);
+      };
+      rec.onend = () => {
+        if (recognitionRef.current === rec && listening) {
+          try { rec.start(); } catch { /* noop */ }
+        }
+      };
+      rec.start();
+      recognitionRef.current = rec;
+
+      startedAtRef.current = Date.now();
+      setElapsed(0);
+      timerRef.current = window.setInterval(
+        () => setElapsed(Math.floor((Date.now() - startedAtRef.current) / 1000)),
+        500,
+      );
+      setListening(true);
+      setRecordingUrl(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't access the mic");
+    }
+  }
+
+  function stopListening() {
+    setListening(false);
+    setLiveText("");
+    try { recognitionRef.current?.stop(); } catch { /* noop */ }
+    recognitionRef.current = null;
+    try { recorderRef.current?.stop(); } catch { /* noop */ }
+    recorderRef.current = null;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      try { recognitionRef.current?.stop(); } catch { /* noop */ }
+      try { recorderRef.current?.stop(); } catch { /* noop */ }
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
+
+  function mmss(s: number) {
+    const m = Math.floor(s / 60).toString().padStart(2, "0");
+    const ss = (s % 60).toString().padStart(2, "0");
+    return `${m}:${ss}`;
+  }
+
 
   useEffect(() => {
     void load();
