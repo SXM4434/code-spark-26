@@ -5,10 +5,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { AppHeader } from "@/components/AppHeader";
 import { Mascot } from "@/components/Mascot";
 
-import { NotesPanel } from "@/components/workspace/NotesPanel";
 import { ParticipantsList } from "@/components/workspace/ParticipantsList";
 import { VoiceGreeting } from "@/components/workspace/VoiceGreeting";
-import { WhiteboardPanel } from "@/components/workspace/WhiteboardPanel";
 import { PollsPanel } from "@/components/workspace/PollsPanel";
 import { MediatorStrip } from "@/components/workspace/MediatorStrip";
 import { MeetingRoomPanel } from "@/components/workspace/MeetingRoomPanel";
