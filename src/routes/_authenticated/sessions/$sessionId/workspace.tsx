@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, ClientOnly } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
@@ -204,7 +204,9 @@ function Workspace() {
             </div>
             <div className="mt-3 flex-1 min-h-0">
               {tab === "room" && (
-                <MeetingRoomPanel sessionId={sessionId} participants={participants} nameMap={nameMap} />
+                <ClientOnly fallback={<div className="h-full" />}>
+                  <MeetingRoomPanel sessionId={sessionId} participants={participants} nameMap={nameMap} />
+                </ClientOnly>
               )}
               {tab === "chat" && <ChatPanel sessionId={sessionId} nameMap={nameMap} />}
               {tab === "notes" && <NotesPanel sessionId={sessionId} />}
