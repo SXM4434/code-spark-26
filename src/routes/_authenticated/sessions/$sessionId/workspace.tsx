@@ -8,7 +8,11 @@ import { ChatPanel } from "@/components/workspace/ChatPanel";
 import { NotesPanel } from "@/components/workspace/NotesPanel";
 import { ParticipantsList } from "@/components/workspace/ParticipantsList";
 import { VoiceGreeting } from "@/components/workspace/VoiceGreeting";
+import { WhiteboardPanel } from "@/components/workspace/WhiteboardPanel";
+import { PollsPanel } from "@/components/workspace/PollsPanel";
+import { MediatorStrip } from "@/components/workspace/MediatorStrip";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/sessions/$sessionId/workspace")({
   component: Workspace,
@@ -29,12 +33,16 @@ const DEMO_LINES = [
   "Love that. Lower friction. We could measure conversion in a week.",
 ];
 
+type Tab = "chat" | "notes" | "board" | "polls";
+
 function Workspace() {
   const { sessionId } = Route.useParams();
   const { user } = useAuth();
   const [session, setSession] = useState<Session | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [greeted, setGreeted] = useState(false);
+  const [tab, setTab] = useState<Tab>("chat");
+  const [wrapping, setWrapping] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -92,14 +100,26 @@ function Workspace() {
         kind: "chat",
       });
     }
-    await new Promise((r) => setTimeout(r, 500));
-    await supabase.from("messages").insert({
-      session_id: sessionId,
-      user_id: user.id,
-      content:
-        "I'm noticing two threads: onboarding friction and pricing-page bounce. Want me to put both on the board so we can pick one?",
-      kind: "ai_mediator",
-    });
+  }
+
+  async function wrapAndGenerate() {
+    setWrapping(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-docs", {
+        body: { session_id: sessionId, kinds: ["summary", "prd", "user_journey", "decisions", "action_items", "team_alignment"] },
+      });
+      if (error) {
+        const msg = (error as { context?: { error?: string } })?.context?.error ?? error.message;
+        toast.error(msg ?? "Generation failed");
+        return;
+      }
+      toast.success(`Generated ${data?.generated?.length ?? 0} docs!`);
+      window.location.href = `/sessions/${sessionId}/wrap`;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Generation failed");
+    } finally {
+      setWrapping(false);
+    }
   }
 
   const nameMap = Object.fromEntries(participants.map((p) => [p.user_id, p.display_name ?? "Someone"]));
@@ -124,6 +144,13 @@ function Workspace() {
     );
   }
 
+  const tabs: Array<{ id: Tab; label: string; icon: string }> = [
+    { id: "chat", label: "Chat", icon: "💬" },
+    { id: "notes", label: "Whispers", icon: "🤫" },
+    { id: "board", label: "Whiteboard", icon: "🎨" },
+    { id: "polls", label: "Polls", icon: "📊" },
+  ];
+
   return (
     <div className="min-h-screen bg-background">
       <AppHeader />
@@ -138,9 +165,12 @@ function Workspace() {
               </p>
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button onClick={startDemo} variant="secondary" className="doodle-btn rounded-full">
-              ✨ Play demo conversation
+              ✨ Play demo
+            </Button>
+            <Button onClick={wrapAndGenerate} disabled={wrapping} className="doodle-btn rounded-full bg-primary">
+              {wrapping ? "Drawing it up…" : "📄 Generate docs"}
             </Button>
             <Link
               to="/dashboard"
@@ -151,19 +181,33 @@ function Workspace() {
           </div>
         </div>
 
-        <div className="mt-5 grid gap-4 lg:grid-cols-[260px_1fr_320px]">
-          <ParticipantsList participants={participants} />
-          <div className="h-[70vh]">
-            <ChatPanel sessionId={sessionId} nameMap={nameMap} />
-          </div>
-          <div className="h-[70vh]">
-            <NotesPanel sessionId={sessionId} />
-          </div>
+        <div className="mt-5">
+          <MediatorStrip sessionId={sessionId} />
         </div>
 
-        <p className="mt-4 text-center text-xs text-muted-foreground">
-          Phase 3 coming up: the live whiteboard and the AI mediator nudging in real time.
-        </p>
+        <div className="mt-5 grid gap-4 lg:grid-cols-[260px_1fr]">
+          <ParticipantsList participants={participants} />
+          <div className="flex h-[70vh] flex-col">
+            <div className="flex flex-wrap gap-2">
+              {tabs.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setTab(t.id)}
+                  className={`doodle-btn rounded-full px-4 py-1.5 font-display text-sm ${tab === t.id ? "bg-primary text-primary-foreground" : "bg-card"}`}
+                >
+                  <span className="mr-1">{t.icon}</span>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <div className="mt-3 flex-1 min-h-0">
+              {tab === "chat" && <ChatPanel sessionId={sessionId} nameMap={nameMap} />}
+              {tab === "notes" && <NotesPanel sessionId={sessionId} />}
+              {tab === "board" && <WhiteboardPanel sessionId={sessionId} />}
+              {tab === "polls" && <PollsPanel sessionId={sessionId} />}
+            </div>
+          </div>
+        </div>
       </main>
     </div>
   );
