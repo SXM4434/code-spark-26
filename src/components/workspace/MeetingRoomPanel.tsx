@@ -222,10 +222,11 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
       .from("messages")
       .select("id,user_id,content,kind,created_at,is_anonymous")
       .eq("session_id", sessionId)
-      .in("kind", ["chat", "voice", "ai_mediator", "system", "anon_note"])
+      .in("kind", ["chat", "voice", "system", "anon_note"])
       .order("created_at", { ascending: true });
     setMessages((data ?? []) as Msg[]);
   }
+
 
   async function loadPolls() {
     const { data } = await supabase
