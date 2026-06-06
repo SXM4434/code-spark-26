@@ -561,8 +561,23 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
     }
   }
 
-
   const flow = elements.filter((e) => e.type === "flow_step");
+  const flowEdges = elements.filter((e) => e.type === "flow_edge");
+
+  // Build map: stepId -> node center, for arrow routing
+  function nodeCenterByStepId(): Record<string, { cx: number; cy: number }> {
+    const out: Record<string, { cx: number; cy: number }> = {};
+    flow.forEach((el, idx) => {
+      const stepId = el.data.stepId;
+      if (!stepId) return;
+      const fb = flowLayoutFor(idx);
+      const x = el.position?.x ?? fb.x;
+      const y = el.position?.y ?? fb.y;
+      out[stepId] = { cx: x + NODE_W / 2, cy: y + NODE_H / 2 };
+    });
+    return out;
+  }
+
 
   // ---------- Canvas drag ----------
   function NodeCard({ el, idx }: { el: WBElement; idx: number }) {
