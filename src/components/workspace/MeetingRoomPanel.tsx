@@ -220,16 +220,36 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   async function loadMessages() {
     const { data } = await supabase
       .from("messages")
-      .select("id,user_id,content,kind,created_at")
+      .select("id,user_id,content,kind,created_at,is_anonymous")
       .eq("session_id", sessionId)
-      .in("kind", ["chat", "voice", "ai_mediator", "system"])
+      .in("kind", ["chat", "voice", "ai_mediator", "system", "anon_note"])
       .order("created_at", { ascending: true });
     setMessages((data ?? []) as Msg[]);
+  }
+
+  async function loadPolls() {
+    const { data } = await supabase
+      .from("polls")
+      .select("id,question,options,status,created_by,created_at")
+      .eq("session_id", sessionId)
+      .order("created_at", { ascending: true });
+    const ps = ((data ?? []) as unknown) as Poll[];
+    setPolls(ps);
+    if (ps.length) {
+      const { data: vs } = await supabase
+        .from("vote_responses")
+        .select("poll_id,user_id,option_id")
+        .in("poll_id", ps.map((p) => p.id));
+      setVotes((vs ?? []) as Vote[]);
+    } else {
+      setVotes([]);
+    }
   }
 
   useEffect(() => {
     void loadElements();
     void loadMessages();
+    void loadPolls();
     const ch = supabase
       .channel(`room:${sessionId}`)
       .on(
@@ -249,10 +269,20 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
         { event: "INSERT", schema: "public", table: "messages", filter: `session_id=eq.${sessionId}` },
         (payload) => {
           const m = payload.new as Msg;
-          if (["chat", "voice", "ai_mediator", "system"].includes(m.kind)) {
+          if (["chat", "voice", "ai_mediator", "system", "anon_note"].includes(m.kind)) {
             setMessages((prev) => [...prev, m]);
           }
         },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "polls", filter: `session_id=eq.${sessionId}` },
+        () => void loadPolls(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "vote_responses" },
+        () => void loadPolls(),
       )
       .subscribe();
     return () => {
@@ -260,6 +290,21 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
+
+  async function votePoll(pollId: string, optionId: string) {
+    if (!user) return;
+    const existing = votes.find((v) => v.poll_id === pollId && v.user_id === user.id);
+    if (existing) {
+      await supabase.from("vote_responses").update({ option_id: optionId }).eq("poll_id", pollId).eq("user_id", user.id);
+    } else {
+      await supabase.from("vote_responses").insert({ poll_id: pollId, user_id: user.id, option_id: optionId });
+    }
+    await loadPolls();
+  }
+
+  async function closePoll(p: Poll) {
+    await supabase.from("polls").update({ status: "closed" }).eq("id", p.id);
+  }
 
   // ---------- Unified feed ----------
   const feed: FeedItem[] = useMemo(() => {
@@ -281,10 +326,12 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
       const tag: FeedItem["tag"] =
         m.kind === "ai_mediator" ? "mediator" :
         m.kind === "system" ? "system" :
-        m.kind === "voice" ? "voice" : "chat";
+        m.kind === "voice" ? "voice" :
+        m.kind === "anon_note" ? "whisper" : "chat";
       const author =
         tag === "mediator" ? "Mediator" :
         tag === "system" ? "system" :
+        tag === "whisper" ? "Anonymous" :
         nameMap[m.user_id ?? ""] ?? "Someone";
       return {
         id: `m-${m.id}`,
@@ -292,12 +339,22 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
         author,
         body: m.content,
         tag,
-        mine: m.user_id === user?.id,
+        mine: tag === "whisper" ? false : m.user_id === user?.id,
       };
     });
 
-    return [...intros, ...msgs].sort((a, b) => a.ts.localeCompare(b.ts));
-  }, [elements, messages, nameMap, user?.id]);
+    const pollItems: FeedItem[] = polls.map((p) => ({
+      id: `p-${p.id}`,
+      ts: p.created_at,
+      author: nameMap[p.created_by ?? ""] ?? "Someone",
+      body: p.question,
+      tag: "poll",
+      mine: p.created_by === user?.id,
+      poll: p,
+    }));
+
+    return [...intros, ...msgs, ...pollItems].sort((a, b) => a.ts.localeCompare(b.ts));
+  }, [elements, messages, polls, nameMap, user?.id]);
 
   useEffect(() => {
     feedEndRef.current?.scrollIntoView({ behavior: "smooth" });
