@@ -146,6 +146,7 @@ function Workspace() {
   }
 
   const tabs: Array<{ id: Tab; label: string; icon: string }> = [
+    { id: "room", label: "Room", icon: "🪑" },
     { id: "chat", label: "Chat", icon: "💬" },
     { id: "notes", label: "Whispers", icon: "🤫" },
     { id: "board", label: "Whiteboard", icon: "🎨" },
