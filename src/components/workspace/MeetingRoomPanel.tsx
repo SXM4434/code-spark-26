@@ -879,6 +879,73 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
           </div>
         </div>
 
+            {/* Arrows */}
+            {(() => {
+              const centers = nodeCenterByStepId();
+              return (
+                <svg
+                  className="pointer-events-none absolute inset-0"
+                  width={CANVAS_W}
+                  height={CANVAS_H}
+                >
+                  <defs>
+                    <marker
+                      id="flow-arrow"
+                      viewBox="0 0 10 10"
+                      refX="9"
+                      refY="5"
+                      markerWidth="6"
+                      markerHeight="6"
+                      orient="auto-start-reverse"
+                    >
+                      <path d="M0,0 L10,5 L0,10 z" fill="hsl(var(--muted-foreground))" />
+                    </marker>
+                  </defs>
+                  {flowEdges.map((e) => {
+                    const a = e.data.from ? centers[e.data.from] : undefined;
+                    const b = e.data.to ? centers[e.data.to] : undefined;
+                    if (!a || !b) return null;
+                    const dx = b.cx - a.cx;
+                    const dy = b.cy - a.cy;
+                    const len = Math.hypot(dx, dy) || 1;
+                    // Trim line so it ends at node edge (approx half NODE_W along the line)
+                    const trim = NODE_W / 2 - 8;
+                    const sx = a.cx + (dx / len) * trim;
+                    const sy = a.cy + (dy / len) * (NODE_H / 2 - 4);
+                    const tx = b.cx - (dx / len) * trim;
+                    const ty = b.cy - (dy / len) * (NODE_H / 2 - 4);
+                    const mx = (sx + tx) / 2;
+                    const my = (sy + ty) / 2;
+                    return (
+                      <g key={e.id}>
+                        <path
+                          d={`M ${sx} ${sy} Q ${mx} ${my - 12} ${tx} ${ty}`}
+                          fill="none"
+                          stroke="hsl(var(--muted-foreground))"
+                          strokeWidth={1.5}
+                          markerEnd="url(#flow-arrow)"
+                          opacity={0.7}
+                        />
+                        {e.data.label && (
+                          <text
+                            x={mx}
+                            y={my - 16}
+                            textAnchor="middle"
+                            className="fill-muted-foreground"
+                            style={{ fontSize: 10 }}
+                          >
+                            {e.data.label}
+                          </text>
+                        )}
+                      </g>
+                    );
+                  })}
+                </svg>
+              );
+            })()}
+          </div>
+        </div>
+
         <div className="flex gap-2 border-t border-border px-4 py-3">
           <Input
             value={flowText}
