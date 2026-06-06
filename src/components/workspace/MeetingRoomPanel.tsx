@@ -91,9 +91,12 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   const { user } = useAuth();
   const [elements, setElements] = useState<WBElement[]>([]);
   const [messages, setMessages] = useState<Msg[]>([]);
+  const [polls, setPolls] = useState<Poll[]>([]);
+  const [votes, setVotes] = useState<Vote[]>([]);
   const [composer, setComposer] = useState("");
-  const [composerMode, setComposerMode] = useState<"chat" | "intro">("chat");
+  const [composerMode, setComposerMode] = useState<"chat" | "intro" | "whisper" | "poll">("chat");
   const [roleText, setRoleText] = useState("");
+  const [pollOptionsText, setPollOptionsText] = useState("Yes\nNo");
   const [flowText, setFlowText] = useState("");
   const [suggesting, setSuggesting] = useState(false);
   const [listening, setListening] = useState(false);
