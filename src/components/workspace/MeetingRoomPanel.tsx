@@ -617,19 +617,25 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
           </div>
         </header>
 
-        {/* Listen bar */}
+        {/* Push-to-talk bar — record only while a person is actively speaking */}
         <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2.5">
           <div className="flex items-center gap-2">
             <span className={`inline-block h-2 w-2 rounded-full ${listening ? "animate-pulse bg-emerald-500" : "bg-muted-foreground/30"}`} />
             <span className="text-xs text-foreground">
-              {listening ? `Listening · ${mmss(elapsed)}` : "Live transcription"}
+              {listening ? `Speaking · ${mmss(elapsed)}` : "Hold to speak"}
             </span>
           </div>
-          {!listening ? (
-            <Button onClick={startListening} size="sm" variant="outline" className="h-7 rounded-md text-xs">Start</Button>
-          ) : (
-            <Button onClick={stopListening} size="sm" variant="outline" className="h-7 rounded-md text-xs">Stop</Button>
-          )}
+          <Button
+            onPointerDown={(e) => { e.preventDefault(); if (!listening) void startListening(); }}
+            onPointerUp={() => { if (listening) stopListening(); }}
+            onPointerLeave={() => { if (listening) stopListening(); }}
+            onPointerCancel={() => { if (listening) stopListening(); }}
+            size="sm"
+            variant={listening ? "default" : "outline"}
+            className="h-7 select-none rounded-md text-xs"
+          >
+            {listening ? "● Recording — release to stop" : "🎙 Hold to speak"}
+          </Button>
         </div>
         {listening && liveText && (
           <p className="border-b border-border px-4 py-2 text-xs italic text-muted-foreground">{liveText}</p>
