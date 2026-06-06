@@ -58,6 +58,8 @@ export function ChatPanel({ sessionId, nameMap }: Props) {
     scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
 
+  const [pendingVoice, setPendingVoice] = useState(false);
+
   async function send(kind: "chat" | "voice", body: string) {
     if (!user || !body.trim()) return;
     await supabase.from("messages").insert({
@@ -73,15 +75,22 @@ export function ChatPanel({ sessionId, nameMap }: Props) {
     if (!text.trim()) return;
     const t = text;
     setText("");
-    await send("chat", t);
+    const wasVoice = pendingVoice;
+    setPendingVoice(false);
+    await send(wasVoice ? "voice" : "chat", t);
   }
 
   async function toggleVoice() {
     if (voice.listening) {
       voice.stop();
-      const t = voice.finalText.trim();
-      if (t) await send("voice", t);
-      voice.reset();
+      setTimeout(() => {
+        const t = voice.finalText.trim();
+        if (t) {
+          setText((prev) => (prev ? prev + " " : "") + t);
+          setPendingVoice(true);
+        }
+        voice.reset();
+      }, 250);
     } else {
       voice.start();
     }
