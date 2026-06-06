@@ -270,7 +270,7 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
         { event: "INSERT", schema: "public", table: "messages", filter: `session_id=eq.${sessionId}` },
         (payload) => {
           const m = payload.new as Msg;
-          if (["chat", "voice", "ai_mediator", "system", "anon_note"].includes(m.kind)) {
+          if (["chat", "voice", "system", "anon_note"].includes(m.kind)) {
             setMessages((prev) => [...prev, m]);
           }
         },
