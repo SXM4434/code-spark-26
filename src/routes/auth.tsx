@@ -113,6 +113,9 @@ function AuthPage() {
             <Button onClick={handleMagic} disabled={busy} variant="ghost" className="w-full rounded-full font-display">
               Send a magic link
             </Button>
+            <Button onClick={handleSkip} disabled={busy} variant="ghost" className="w-full rounded-full font-display text-primary hover:text-primary">
+              ✨ Skip account creation — try demo
+            </Button>
           </div>
 
           <button
