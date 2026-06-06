@@ -165,6 +165,11 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
         { event: "*", schema: "public", table: "whiteboard_elements", filter: `session_id=eq.${sessionId}` },
         () => load(),
       )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages", filter: `session_id=eq.${sessionId}` },
+        () => setChatBeat((b) => b + 1),
+      )
       .subscribe();
     return () => {
       supabase.removeChannel(ch);
@@ -175,6 +180,29 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   useEffect(() => {
     introsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [elements.length]);
+
+  // Auto-rebuild flow as the conversation evolves
+  useEffect(() => {
+    if (!autoFlow) return;
+    const introCount = elements.filter((e) => e.type === "intro").length;
+    if (introCount === 0 && chatBeat === 0) return;
+    const sig = `${introCount}:${chatBeat}`;
+    if (sig === lastSigRef.current) return;
+    if (flowDebounceRef.current) clearTimeout(flowDebounceRef.current);
+    flowDebounceRef.current = window.setTimeout(async () => {
+      lastSigRef.current = sig;
+      setAutoBusy(true);
+      try {
+        await suggestFlow(true);
+      } finally {
+        setAutoBusy(false);
+      }
+    }, 8000);
+    return () => {
+      if (flowDebounceRef.current) clearTimeout(flowDebounceRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [elements, chatBeat, autoFlow]);
 
   async function load() {
     const { data } = await supabase
