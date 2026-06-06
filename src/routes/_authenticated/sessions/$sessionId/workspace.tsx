@@ -11,6 +11,7 @@ import { VoiceGreeting } from "@/components/workspace/VoiceGreeting";
 import { WhiteboardPanel } from "@/components/workspace/WhiteboardPanel";
 import { PollsPanel } from "@/components/workspace/PollsPanel";
 import { MediatorStrip } from "@/components/workspace/MediatorStrip";
+import { MeetingRoomPanel } from "@/components/workspace/MeetingRoomPanel";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
