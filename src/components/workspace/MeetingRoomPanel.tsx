@@ -25,6 +25,7 @@ type WBElement = {
     from?: string;
     to?: string;
     label?: string | null;
+    color?: string;
   };
   position: { x?: number; y?: number } | null;
   created_at: string;
@@ -80,21 +81,41 @@ const TAG_STYLES: Record<FeedItem["tag"], string> = {
 };
 
 const TAG_LABELS: Record<FeedItem["tag"], string> = {
-  intro: "intro",
-  spoken: "spoken",
-  chat: "chat",
-  voice: "voice",
-  mediator: "mediator",
-  system: "system",
-  whisper: "whisper",
-  poll: "poll",
+  intro: "intro", spoken: "spoken", chat: "chat", voice: "voice",
+  mediator: "mediator", system: "system", whisper: "whisper", poll: "poll",
 };
 
 // Canvas sizing — generous virtual surface
 const CANVAS_W = 1600;
 const CANVAS_H = 1000;
 const NODE_W = 200;
-const NODE_H = 84;
+const NODE_H = 110;
+
+// Sticky-note palette — playful but professional
+const STICKY_COLORS = [
+  { bg: "#fef3c7", border: "#fcd34d", ink: "#78350f" }, // amber
+  { bg: "#fce7f3", border: "#f9a8d4", ink: "#831843" }, // pink
+  { bg: "#dcfce7", border: "#86efac", ink: "#14532d" }, // mint
+  { bg: "#dbeafe", border: "#93c5fd", ink: "#1e3a8a" }, // sky
+  { bg: "#ede9fe", border: "#c4b5fd", ink: "#4c1d95" }, // lavender
+  { bg: "#ffedd5", border: "#fdba74", ink: "#7c2d12" }, // peach
+];
+
+function hashIdx(s: string, n: number) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h) % n;
+}
+function stickyFor(el: WBElement) {
+  if (el.data.color) {
+    const m = STICKY_COLORS.find((c) => c.bg === el.data.color);
+    if (m) return m;
+  }
+  return STICKY_COLORS[hashIdx(el.id, STICKY_COLORS.length)];
+}
+function rotFor(id: string) {
+  return hashIdx(id, 7) - 3; // -3..3 deg
+}
 
 export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   const { user } = useAuth();
@@ -106,13 +127,15 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   const [composerMode, setComposerMode] = useState<"chat" | "intro" | "whisper" | "poll">("chat");
   const [roleText, setRoleText] = useState("");
   const [pollOptionsText, setPollOptionsText] = useState("Yes\nNo");
-  const [flowText, setFlowText] = useState("");
   const [suggesting, setSuggesting] = useState(false);
   const [listening, setListening] = useState(false);
   const [liveText, setLiveText] = useState("");
   const [elapsed, setElapsed] = useState(0);
   const [autoFlow, setAutoFlow] = useState(true);
   const [autoBusy, setAutoBusy] = useState(false);
+  // Canvas interaction state
+  const [linkFromStep, setLinkFromStep] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const feedEndRef = useRef<HTMLDivElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -123,9 +146,7 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   const lastSigRef = useRef<string>("");
 
   const userIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    userIdRef.current = user?.id ?? null;
-  }, [user?.id]);
+  useEffect(() => { userIdRef.current = user?.id ?? null; }, [user?.id]);
 
   // ---------- ElevenLabs Scribe ----------
   const persistSpoken = async (text: string) => {
@@ -236,7 +257,6 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
     setMessages((data ?? []) as Msg[]);
   }
 
-
   async function loadPolls() {
     const { data } = await supabase
       .from("polls")
@@ -295,9 +315,7 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
         () => void loadPolls(),
       )
       .subscribe();
-    return () => {
-      supabase.removeChannel(ch);
-    };
+    return () => { supabase.removeChannel(ch); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
@@ -366,9 +384,7 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
     return [...intros, ...msgs, ...pollItems].sort((a, b) => a.ts.localeCompare(b.ts));
   }, [elements, messages, polls, nameMap, user?.id]);
 
-  useEffect(() => {
-    feedEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [feed.length]);
+  useEffect(() => { feedEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [feed.length]);
 
   // ---------- Auto flow ----------
   useEffect(() => {
@@ -388,7 +404,7 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [feed, autoFlow]);
 
-  // ---------- Actions ----------
+  // ---------- Composer ----------
   async function sendComposer() {
     if (!user || !composer.trim()) return;
     const body = composer.trim();
@@ -414,55 +430,56 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
       });
     } else if (composerMode === "poll") {
       const opts = pollOptionsText.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 6);
-      if (opts.length < 2) {
-        toast.error("Add at least 2 options (one per line)");
-        return;
-      }
+      if (opts.length < 2) { toast.error("Add at least 2 options (one per line)"); return; }
       setComposer("");
       const options: PollOption[] = opts.map((label, i) => ({ id: `o${i + 1}`, label }));
       const { error } = await supabase.from("polls").insert({
-        session_id: sessionId,
-        question: body,
-        options,
-        created_by: user.id,
-        status: "open",
+        session_id: sessionId, question: body, options, created_by: user.id, status: "open",
       });
-      if (error) toast.error(error.message);
-      else setPollOptionsText("Yes\nNo");
+      if (error) toast.error(error.message); else setPollOptionsText("Yes\nNo");
     } else {
       setComposer("");
       await supabase.from("messages").insert({
-        session_id: sessionId,
-        user_id: user.id,
-        content: body,
-        kind: "chat",
+        session_id: sessionId, user_id: user.id, content: body, kind: "chat",
       });
     }
   }
 
-
+  // ---------- Canvas actions ----------
   function defaultPositionFor(idx: number) {
     const cols = 4;
-    const gx = 60, gy = 60, sx = 260, sy = 140;
+    const gx = 60, gy = 60, sx = 260, sy = 160;
     return { x: gx + (idx % cols) * sx, y: gy + Math.floor(idx / cols) * sy };
   }
 
-  async function addFlowStep() {
-    if (!user || !flowText.trim()) return;
-    const flowCount = elements.filter((e) => e.type === "flow_step").length;
-    await supabase.from("whiteboard_elements").insert({
+  async function addEmptyNote() {
+    if (!user) return;
+    const count = elements.filter((e) => e.type === "flow_step").length;
+    const stepId = crypto.randomUUID();
+    const { data, error } = await supabase.from("whiteboard_elements").insert({
       session_id: sessionId,
       type: "flow_step",
-      data: { text: flowText.trim(), author: nameMap[user.id] ?? "Someone" },
-      position: defaultPositionFor(flowCount),
+      data: { text: "New step", author: nameMap[user.id] ?? "Someone", stepId },
+      position: defaultPositionFor(count),
       created_by: user.id,
       source: "user",
-    });
-    setFlowText("");
+    }).select("id").single();
+    if (!error && data) setEditingId(data.id);
   }
 
   async function removeElement(id: string) {
+    // Also clean up edges referencing this node's stepId
+    const node = elements.find((e) => e.id === id);
+    const stepId = node?.data.stepId;
     await supabase.from("whiteboard_elements").delete().eq("id", id);
+    if (stepId) {
+      const orphanEdges = elements.filter((e) =>
+        e.type === "flow_edge" && (e.data.from === stepId || e.data.to === stepId),
+      );
+      if (orphanEdges.length) {
+        await supabase.from("whiteboard_elements").delete().in("id", orphanEdges.map((e) => e.id));
+      }
+    }
   }
 
   async function updateNodePosition(id: string, pos: { x: number; y: number }) {
@@ -470,9 +487,38 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
     await supabase.from("whiteboard_elements").update({ position: pos }).eq("id", id);
   }
 
+  async function saveNodeText(el: WBElement, text: string) {
+    const next = { ...el.data, text };
+    setElements((prev) => prev.map((x) => (x.id === el.id ? { ...x, data: next } : x)));
+    await supabase.from("whiteboard_elements").update({ data: next }).eq("id", el.id);
+  }
+
+  async function cycleColor(el: WBElement) {
+    const cur = stickyFor(el).bg;
+    const idx = STICKY_COLORS.findIndex((c) => c.bg === cur);
+    const next = STICKY_COLORS[(idx + 1) % STICKY_COLORS.length].bg;
+    const data = { ...el.data, color: next };
+    setElements((prev) => prev.map((x) => (x.id === el.id ? { ...x, data } : x)));
+    await supabase.from("whiteboard_elements").update({ data }).eq("id", el.id);
+  }
+
+  async function createEdge(fromKey: string, toKey: string) {
+    if (!user || fromKey === toKey) return;
+    // Avoid duplicates
+    if (elements.some((e) => e.type === "flow_edge" && e.data.from === fromKey && e.data.to === toKey)) return;
+    await supabase.from("whiteboard_elements").insert({
+      session_id: sessionId,
+      type: "flow_edge",
+      data: { from: fromKey, to: toKey },
+      position: { x: 0, y: 0 },
+      created_by: user.id,
+      source: "user",
+    });
+  }
+
   function flowLayoutFor(idx: number) {
     const cols = 4;
-    const gx = 60, gy = 80, sx = 240, sy = 150;
+    const gx = 60, gy = 80, sx = 240, sy = 160;
     return { x: gx + (idx % cols) * sx, y: gy + Math.floor(idx / cols) * sy };
   }
 
@@ -517,18 +563,13 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
       const edges = flow?.edges ?? [];
       if (steps.length === 0) return;
 
-      // Clear previous AI-generated flow + edges
       const { data: existingAi } = await supabase
-        .from("whiteboard_elements")
-        .select("id")
-        .eq("session_id", sessionId)
-        .in("type", ["flow_step", "flow_edge"])
-        .eq("source", "ai");
+        .from("whiteboard_elements").select("id")
+        .eq("session_id", sessionId).in("type", ["flow_step", "flow_edge"]).eq("source", "ai");
       if (existingAi?.length) {
         await supabase.from("whiteboard_elements").delete().in("id", existingAi.map((r) => r.id));
       }
 
-      // Preserve any user-placed AI nodes' positions by stepId if they had one
       for (let i = 0; i < Math.min(steps.length, 8); i++) {
         const s = steps[i];
         await supabase.from("whiteboard_elements").insert({
@@ -543,12 +584,9 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
 
       if (edges.length) {
         const edgeRows = edges.slice(0, 12).map((e) => ({
-          session_id: sessionId,
-          type: "flow_edge",
+          session_id: sessionId, type: "flow_edge",
           data: { from: e.from, to: e.to, label: e.label ?? null },
-          position: { x: 0, y: 0 },
-          created_by: user.id,
-          source: "ai",
+          position: { x: 0, y: 0 }, created_by: user.id, source: "ai",
         }));
         await supabase.from("whiteboard_elements").insert(edgeRows);
       }
@@ -564,77 +602,179 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   const flow = elements.filter((e) => e.type === "flow_step");
   const flowEdges = elements.filter((e) => e.type === "flow_edge");
 
-  // Build map: stepId -> node center, for arrow routing
-  function nodeCenterByStepId(): Record<string, { cx: number; cy: number }> {
+  // Map key (stepId || el.id) -> {cx,cy} for arrow routing
+  function nodeCenters(): Record<string, { cx: number; cy: number }> {
     const out: Record<string, { cx: number; cy: number }> = {};
     flow.forEach((el, idx) => {
-      const stepId = el.data.stepId;
-      if (!stepId) return;
       const fb = flowLayoutFor(idx);
       const x = el.position?.x ?? fb.x;
       const y = el.position?.y ?? fb.y;
-      out[stepId] = { cx: x + NODE_W / 2, cy: y + NODE_H / 2 };
+      const c = { cx: x + NODE_W / 2, cy: y + NODE_H / 2 };
+      if (el.data.stepId) out[el.data.stepId] = c;
+      out[el.id] = c;
     });
     return out;
   }
 
-
-  // ---------- Canvas drag ----------
+  // ---------- Sticky note (draggable, editable, linkable) ----------
   function NodeCard({ el, idx }: { el: WBElement; idx: number }) {
     const fallback = defaultPositionFor(idx);
     const x = el.position?.x ?? fallback.x;
     const y = el.position?.y ?? fallback.y;
     const dragOffset = useRef<{ dx: number; dy: number } | null>(null);
+    const movedRef = useRef(false);
     const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
     const cur = dragPos ?? { x, y };
+    const sticky = stickyFor(el);
+    const rot = rotFor(el.id);
+    const isEditing = editingId === el.id;
+    const linkKey = el.data.stepId ?? el.id;
+    const isLinkSource = linkFromStep === linkKey;
+    const isLinkTarget = linkFromStep !== null && !isLinkSource;
+    const isAI = el.source === "ai";
+    const canEdit = el.created_by === user?.id || isAI;
 
     function onPointerDown(e: React.PointerEvent) {
+      if (isEditing) return;
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
       dragOffset.current = { dx: e.clientX - cur.x, dy: e.clientY - cur.y };
+      movedRef.current = false;
       setDragPos(cur);
     }
     function onPointerMove(e: React.PointerEvent) {
       if (!dragOffset.current) return;
       const nx = Math.max(0, Math.min(CANVAS_W - NODE_W, e.clientX - dragOffset.current.dx));
       const ny = Math.max(0, Math.min(CANVAS_H - NODE_H, e.clientY - dragOffset.current.dy));
+      if (Math.abs(nx - cur.x) + Math.abs(ny - cur.y) > 3) movedRef.current = true;
       setDragPos({ x: nx, y: ny });
     }
     function onPointerUp() {
-      if (dragPos) void updateNodePosition(el.id, dragPos);
+      const wasDragging = dragOffset.current !== null;
+      const moved = movedRef.current;
+      if (wasDragging && moved && dragPos) void updateNodePosition(el.id, dragPos);
       dragOffset.current = null;
       setDragPos(null);
+      // Click (no drag) handles linking
+      if (wasDragging && !moved) {
+        if (linkFromStep && !isLinkSource) {
+          void createEdge(linkFromStep, linkKey);
+          setLinkFromStep(null);
+        } else if (isLinkSource) {
+          setLinkFromStep(null);
+        }
+      }
+      movedRef.current = false;
     }
 
-    const isAI = el.source === "ai";
     return (
       <div
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
-        style={{ left: cur.x, top: cur.y, width: NODE_W, minHeight: NODE_H }}
-        className={`group absolute cursor-grab active:cursor-grabbing select-none rounded-lg border bg-card p-3 shadow-sm transition-shadow hover:shadow-md ${
-          isAI ? "border-violet-500/30" : "border-border"
-        }`}
+        onDoubleClick={(e) => { e.stopPropagation(); if (canEdit) setEditingId(el.id); }}
+        style={{
+          left: cur.x, top: cur.y, width: NODE_W, minHeight: NODE_H,
+          background: sticky.bg,
+          borderColor: sticky.border,
+          color: sticky.ink,
+          transform: `rotate(${dragPos ? 0 : rot}deg)`,
+          boxShadow: dragPos
+            ? "0 14px 30px -10px rgba(0,0,0,0.35)"
+            : "0 6px 14px -8px rgba(0,0,0,0.25), 0 2px 4px -2px rgba(0,0,0,0.15)",
+        }}
+        className={`group absolute select-none rounded-[6px] border p-3 transition-shadow ${
+          isEditing ? "cursor-text" : "cursor-grab active:cursor-grabbing"
+        } ${isLinkSource ? "ring-2 ring-foreground" : ""} ${isLinkTarget ? "ring-2 ring-foreground/40" : ""}`}
       >
-        <div className="flex items-center justify-between gap-2">
-          <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-foreground/5 text-[10px] font-semibold text-foreground">
+        <div className="flex items-center justify-between gap-1">
+          <span
+            className="inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold"
+            style={{ background: "rgba(0,0,0,0.08)", color: sticky.ink }}
+          >
             {idx + 1}
           </span>
-          <span className={`rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-wider ${isAI ? TAG_STYLES.mediator : "border-border bg-background text-muted-foreground"}`}>
+          <span
+            className="rounded-full px-1.5 py-0.5 text-[9px] uppercase tracking-wider"
+            style={{ background: "rgba(0,0,0,0.06)", color: sticky.ink, opacity: 0.75 }}
+          >
             {isAI ? "ai" : "team"}
           </span>
-          {(el.created_by === user?.id || isAI) && (
-            <button
-              onClick={(e) => { e.stopPropagation(); void removeElement(el.id); }}
-              onPointerDown={(e) => e.stopPropagation()}
-              className="opacity-0 transition group-hover:opacity-100 text-xs text-muted-foreground hover:text-destructive"
-            >
-              ×
-            </button>
-          )}
+          <div className="ml-auto flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
+            {canEdit && (
+              <>
+                <button
+                  title="Cycle color"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); void cycleColor(el); }}
+                  className="h-4 w-4 rounded-full border"
+                  style={{ background: sticky.border, borderColor: sticky.ink }}
+                />
+                <button
+                  title="Edit text"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); setEditingId(el.id); }}
+                  className="text-[10px] leading-none"
+                  style={{ color: sticky.ink }}
+                >
+                  ✎
+                </button>
+                <button
+                  title="Delete"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); void removeElement(el.id); }}
+                  className="text-[12px] leading-none"
+                  style={{ color: sticky.ink }}
+                >
+                  ×
+                </button>
+              </>
+            )}
+          </div>
         </div>
-        <p className="mt-1.5 text-[13px] leading-snug text-foreground">{el.data.text}</p>
+
+        {isEditing ? (
+          <textarea
+            autoFocus
+            defaultValue={el.data.text ?? ""}
+            onPointerDown={(e) => e.stopPropagation()}
+            onBlur={(e) => { void saveNodeText(el, e.target.value); setEditingId(null); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                (e.target as HTMLTextAreaElement).blur();
+              } else if (e.key === "Escape") {
+                setEditingId(null);
+              }
+            }}
+            className="mt-1.5 w-full resize-none bg-transparent text-[13px] leading-snug outline-none"
+            style={{ color: sticky.ink, minHeight: 48 }}
+          />
+        ) : (
+          <p className="mt-1.5 break-words text-[13px] leading-snug" style={{ color: sticky.ink }}>
+            {el.data.text || <span className="opacity-50">Double-click to edit…</span>}
+          </p>
+        )}
+
+        {/* Connector handle on the right edge */}
+        <button
+          title={isLinkSource ? "Cancel link" : "Drag a connector from here"}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            setLinkFromStep(isLinkSource ? null : linkKey);
+          }}
+          className={`absolute -right-2 top-1/2 z-10 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full border text-[10px] font-bold transition ${
+            isLinkSource ? "scale-110" : "opacity-0 group-hover:opacity-100"
+          }`}
+          style={{
+            background: isLinkSource ? sticky.ink : sticky.bg,
+            color: isLinkSource ? sticky.bg : sticky.ink,
+            borderColor: sticky.ink,
+          }}
+        >
+          →
+        </button>
       </div>
     );
   }
@@ -666,7 +806,7 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
           </div>
         </header>
 
-        {/* Push-to-talk bar — record only while a person is actively speaking */}
+        {/* Push-to-talk bar */}
         <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2.5">
           <div className="flex items-center gap-2">
             <span className={`inline-block h-2 w-2 rounded-full ${listening ? "animate-pulse bg-emerald-500" : "bg-muted-foreground/30"}`} />
@@ -804,10 +944,7 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
               value={composer}
               onChange={(e) => setComposer(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  void sendComposer();
-                }
+                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendComposer(); }
               }}
               placeholder={
                 composerMode === "intro" ? "Hi, I'm here to help with…" :
@@ -824,16 +961,23 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
         </div>
       </section>
 
-      {/* RIGHT — Collaborative flow canvas */}
+      {/* RIGHT — Sticky-note process flow canvas */}
       <section className="flex h-full min-h-0 flex-col rounded-2xl border border-border bg-card">
         <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
           <div>
-            <h2 className="text-sm font-semibold tracking-tight text-foreground">Flow canvas</h2>
+            <h2 className="text-sm font-semibold tracking-tight text-foreground">Process flow</h2>
             <p className="text-xs text-muted-foreground">
-              {autoFlow ? (autoBusy ? "Updating from the conversation…" : "Auto-sketching · drag to arrange together") : "Manual mode · drag to arrange together"}
+              {linkFromStep
+                ? "Click another note to connect — or click the source again to cancel."
+                : autoFlow
+                  ? (autoBusy ? "Updating from the conversation…" : "Drag · double-click to edit · → to connect")
+                  : "Manual mode · drag, edit, and connect"}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <Button onClick={addEmptyNote} size="sm" variant="outline" className="h-7 rounded-md text-xs">
+              + Note
+            </Button>
             <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
               <input
                 type="checkbox"
@@ -855,22 +999,29 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
           </div>
         </header>
 
-        <div className="flex-1 min-h-0 overflow-auto">
+        <div
+          className="flex-1 min-h-0 overflow-auto"
+          onClick={() => { if (linkFromStep) setLinkFromStep(null); }}
+        >
           <div
             className="relative"
             style={{
               width: CANVAS_W,
               height: CANVAS_H,
+              backgroundColor: "hsl(var(--muted) / 0.3)",
               backgroundImage:
                 "radial-gradient(circle, hsl(var(--border)) 1px, transparent 1px)",
               backgroundSize: "24px 24px",
             }}
           >
             {flow.length === 0 && (
-              <div className="absolute inset-0 flex items-center justify-center">
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
                 <p className="text-xs text-muted-foreground">
-                  Empty canvas. Add a step below or let the conversation fill it.
+                  Blank canvas. Add a note, or let the conversation fill it in.
                 </p>
+                <Button onClick={addEmptyNote} size="sm" variant="outline" className="h-7 rounded-md text-xs">
+                  + Add your first note
+                </Button>
               </div>
             )}
             {flow.map((el, idx) => (
@@ -878,24 +1029,18 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
             ))}
             {/* Arrows */}
             {(() => {
-              const centers = nodeCenterByStepId();
+              const centers = nodeCenters();
               return (
-                <svg
-                  className="pointer-events-none absolute inset-0"
-                  width={CANVAS_W}
-                  height={CANVAS_H}
-                >
+                <svg className="pointer-events-none absolute inset-0" width={CANVAS_W} height={CANVAS_H}>
                   <defs>
                     <marker
                       id="flow-arrow"
                       viewBox="0 0 10 10"
-                      refX="9"
-                      refY="5"
-                      markerWidth="6"
-                      markerHeight="6"
+                      refX="9" refY="5"
+                      markerWidth="6" markerHeight="6"
                       orient="auto-start-reverse"
                     >
-                      <path d="M0,0 L10,5 L0,10 z" fill="hsl(var(--muted-foreground))" />
+                      <path d="M0,0 L10,5 L0,10 z" fill="hsl(var(--foreground) / 0.55)" />
                     </marker>
                   </defs>
                   {flowEdges.map((e) => {
@@ -905,30 +1050,30 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
                     const dx = b.cx - a.cx;
                     const dy = b.cy - a.cy;
                     const len = Math.hypot(dx, dy) || 1;
-                    const trim = NODE_W / 2 - 8;
-                    const sx = a.cx + (dx / len) * trim;
-                    const sy = a.cy + (dy / len) * (NODE_H / 2 - 4);
-                    const tx = b.cx - (dx / len) * trim;
-                    const ty = b.cy - (dy / len) * (NODE_H / 2 - 4);
+                    const trimX = NODE_W / 2 - 8;
+                    const trimY = NODE_H / 2 - 4;
+                    const sx = a.cx + (dx / len) * trimX;
+                    const sy = a.cy + (dy / len) * trimY;
+                    const tx = b.cx - (dx / len) * trimX;
+                    const ty = b.cy - (dy / len) * trimY;
                     const mx = (sx + tx) / 2;
                     const my = (sy + ty) / 2;
                     return (
                       <g key={e.id}>
                         <path
-                          d={`M ${sx} ${sy} Q ${mx} ${my - 12} ${tx} ${ty}`}
+                          d={`M ${sx} ${sy} Q ${mx} ${my - 22} ${tx} ${ty}`}
                           fill="none"
-                          stroke="hsl(var(--muted-foreground))"
-                          strokeWidth={1.5}
+                          stroke="hsl(var(--foreground) / 0.55)"
+                          strokeWidth={1.75}
+                          strokeLinecap="round"
                           markerEnd="url(#flow-arrow)"
-                          opacity={0.7}
                         />
                         {e.data.label && (
                           <text
-                            x={mx}
-                            y={my - 16}
+                            x={mx} y={my - 26}
                             textAnchor="middle"
-                            className="fill-muted-foreground"
-                            style={{ fontSize: 10 }}
+                            className="fill-foreground"
+                            style={{ fontSize: 10, opacity: 0.7 }}
                           >
                             {e.data.label}
                           </text>
@@ -940,23 +1085,6 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
               );
             })()}
           </div>
-        </div>
-
-
-        <div className="flex gap-2 border-t border-border px-4 py-3">
-          <Input
-            value={flowText}
-            onChange={(e) => setFlowText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void addFlowStep();
-              }
-            }}
-            placeholder="Add a step to the canvas…"
-            className="h-9 rounded-md text-sm"
-          />
-          <Button onClick={addFlowStep} size="sm" className="h-9 rounded-md">Add</Button>
         </div>
       </section>
     </div>
