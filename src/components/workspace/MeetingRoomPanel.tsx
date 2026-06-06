@@ -29,15 +29,28 @@ type Msg = {
   content: string;
   kind: string;
   created_at: string;
+  is_anonymous?: boolean;
 };
+
+type PollOption = { id: string; label: string };
+type Poll = {
+  id: string;
+  question: string;
+  options: PollOption[];
+  status: "open" | "closed";
+  created_by: string | null;
+  created_at: string;
+};
+type Vote = { poll_id: string; user_id: string; option_id: string };
 
 type FeedItem = {
   id: string;
   ts: string;
   author: string;
   body: string;
-  tag: "intro" | "spoken" | "chat" | "voice" | "mediator" | "system";
+  tag: "intro" | "spoken" | "chat" | "voice" | "mediator" | "system" | "whisper" | "poll";
   mine: boolean;
+  poll?: Poll;
 };
 
 type Props = {
@@ -53,6 +66,8 @@ const TAG_STYLES: Record<FeedItem["tag"], string> = {
   voice: "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20",
   mediator: "bg-violet-500/10 text-violet-700 dark:text-violet-300 border-violet-500/20",
   system: "bg-muted text-muted-foreground border-border",
+  whisper: "bg-pink-500/10 text-pink-700 dark:text-pink-300 border-pink-500/20",
+  poll: "bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border-cyan-500/20",
 };
 
 const TAG_LABELS: Record<FeedItem["tag"], string> = {
@@ -62,6 +77,8 @@ const TAG_LABELS: Record<FeedItem["tag"], string> = {
   voice: "voice",
   mediator: "mediator",
   system: "system",
+  whisper: "whisper",
+  poll: "poll",
 };
 
 // Canvas sizing — generous virtual surface
