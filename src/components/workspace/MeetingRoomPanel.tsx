@@ -213,22 +213,36 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
     await supabase.from("whiteboard_elements").delete().eq("id", id);
   }
 
-  async function suggestFlow() {
+  async function suggestFlow(silent = false) {
     if (!user) return;
-    setSuggesting(true);
+    if (!silent) setSuggesting(true);
     try {
       const intros = elements.filter((e) => e.type === "intro");
-      if (intros.length === 0) {
-        toast.error("Add a few intros first so Cartoonist has something to work with.");
+      const { data: msgs } = await supabase
+        .from("messages")
+        .select("content,kind,user_id,created_at")
+        .eq("session_id", sessionId)
+        .in("kind", ["chat", "voice"])
+        .order("created_at", { ascending: false })
+        .limit(40);
+
+      if (intros.length === 0 && (msgs?.length ?? 0) === 0) {
+        if (!silent) toast.error("Need some conversation first.");
         return;
       }
-      const context = intros
+
+      const introCtx = intros
         .map((i) => `${i.data.author ?? "Someone"}${i.data.role ? ` (${i.data.role})` : ""}: ${i.data.text}`)
         .join("\n");
+      const chatCtx = (msgs ?? [])
+        .reverse()
+        .map((m) => `${nameMap[m.user_id ?? ""] ?? "Someone"}: ${m.content}`)
+        .join("\n");
+
       const { data, error } = await supabase.functions.invoke("mediator", {
         body: {
           session_id: sessionId,
-          prompt: `Based on these team introductions, sketch a 4-6 step user flow that fits what they're building. Return ONLY a JSON array of short step strings.\n\nIntros:\n${context}`,
+          prompt: `You are sketching a live user flow that evolves as a team talks. Based on the intros and chat, return ONLY a JSON array of 4-7 short step strings (max 8 words each) describing the user journey of what they're building. No prose.\n\nIntros:\n${introCtx}\n\nConversation:\n${chatCtx}`,
           mode: "flow",
         },
       });
@@ -236,6 +250,18 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
       const raw = (data?.text ?? data?.response ?? "").toString();
       const match = raw.match(/\[[\s\S]*\]/);
       const steps: string[] = match ? JSON.parse(match[0]) : [];
+      if (steps.length === 0) return;
+
+      // Replace previous AI steps; keep user-added ones
+      const { data: existingAi } = await supabase
+        .from("whiteboard_elements")
+        .select("id")
+        .eq("session_id", sessionId)
+        .eq("type", "flow_step")
+        .eq("source", "ai");
+      if (existingAi?.length) {
+        await supabase.from("whiteboard_elements").delete().in("id", existingAi.map((r) => r.id));
+      }
       for (const step of steps.slice(0, 8)) {
         await supabase.from("whiteboard_elements").insert({
           session_id: sessionId,
@@ -246,13 +272,14 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
           source: "ai",
         });
       }
-      toast.success(`Cartoonist sketched ${steps.length} steps`);
+      if (!silent) toast.success(`Cartoonist sketched ${steps.length} steps`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Couldn't sketch the flow");
+      if (!silent) toast.error(e instanceof Error ? e.message : "Couldn't sketch the flow");
     } finally {
-      setSuggesting(false);
+      if (!silent) setSuggesting(false);
     }
   }
+
 
   const intros = elements.filter((e) => e.type === "intro");
   const flow = elements.filter((e) => e.type === "flow_step");
