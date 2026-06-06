@@ -39,6 +39,8 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   const [liveText, setLiveText] = useState("");
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [autoFlow, setAutoFlow] = useState(true);
+  const [autoBusy, setAutoBusy] = useState(false);
   const introsEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -46,6 +48,9 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<number | null>(null);
   const startedAtRef = useRef<number>(0);
+  const flowDebounceRef = useRef<number | null>(null);
+  const lastSigRef = useRef<string>("");
+  const [chatBeat, setChatBeat] = useState(0);
 
   const sttSupported =
     typeof window !== "undefined" &&
