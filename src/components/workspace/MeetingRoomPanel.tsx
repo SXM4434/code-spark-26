@@ -29,15 +29,28 @@ type Msg = {
   content: string;
   kind: string;
   created_at: string;
+  is_anonymous?: boolean;
 };
+
+type PollOption = { id: string; label: string };
+type Poll = {
+  id: string;
+  question: string;
+  options: PollOption[];
+  status: "open" | "closed";
+  created_by: string | null;
+  created_at: string;
+};
+type Vote = { poll_id: string; user_id: string; option_id: string };
 
 type FeedItem = {
   id: string;
   ts: string;
   author: string;
   body: string;
-  tag: "intro" | "spoken" | "chat" | "voice" | "mediator" | "system";
+  tag: "intro" | "spoken" | "chat" | "voice" | "mediator" | "system" | "whisper" | "poll";
   mine: boolean;
+  poll?: Poll;
 };
 
 type Props = {
@@ -53,6 +66,8 @@ const TAG_STYLES: Record<FeedItem["tag"], string> = {
   voice: "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20",
   mediator: "bg-violet-500/10 text-violet-700 dark:text-violet-300 border-violet-500/20",
   system: "bg-muted text-muted-foreground border-border",
+  whisper: "bg-pink-500/10 text-pink-700 dark:text-pink-300 border-pink-500/20",
+  poll: "bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border-cyan-500/20",
 };
 
 const TAG_LABELS: Record<FeedItem["tag"], string> = {
@@ -62,6 +77,8 @@ const TAG_LABELS: Record<FeedItem["tag"], string> = {
   voice: "voice",
   mediator: "mediator",
   system: "system",
+  whisper: "whisper",
+  poll: "poll",
 };
 
 // Canvas sizing — generous virtual surface
@@ -74,9 +91,12 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   const { user } = useAuth();
   const [elements, setElements] = useState<WBElement[]>([]);
   const [messages, setMessages] = useState<Msg[]>([]);
+  const [polls, setPolls] = useState<Poll[]>([]);
+  const [votes, setVotes] = useState<Vote[]>([]);
   const [composer, setComposer] = useState("");
-  const [composerMode, setComposerMode] = useState<"chat" | "intro">("chat");
+  const [composerMode, setComposerMode] = useState<"chat" | "intro" | "whisper" | "poll">("chat");
   const [roleText, setRoleText] = useState("");
+  const [pollOptionsText, setPollOptionsText] = useState("Yes\nNo");
   const [flowText, setFlowText] = useState("");
   const [suggesting, setSuggesting] = useState(false);
   const [listening, setListening] = useState(false);
@@ -200,16 +220,36 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   async function loadMessages() {
     const { data } = await supabase
       .from("messages")
-      .select("id,user_id,content,kind,created_at")
+      .select("id,user_id,content,kind,created_at,is_anonymous")
       .eq("session_id", sessionId)
-      .in("kind", ["chat", "voice", "ai_mediator", "system"])
+      .in("kind", ["chat", "voice", "ai_mediator", "system", "anon_note"])
       .order("created_at", { ascending: true });
     setMessages((data ?? []) as Msg[]);
+  }
+
+  async function loadPolls() {
+    const { data } = await supabase
+      .from("polls")
+      .select("id,question,options,status,created_by,created_at")
+      .eq("session_id", sessionId)
+      .order("created_at", { ascending: true });
+    const ps = ((data ?? []) as unknown) as Poll[];
+    setPolls(ps);
+    if (ps.length) {
+      const { data: vs } = await supabase
+        .from("vote_responses")
+        .select("poll_id,user_id,option_id")
+        .in("poll_id", ps.map((p) => p.id));
+      setVotes((vs ?? []) as Vote[]);
+    } else {
+      setVotes([]);
+    }
   }
 
   useEffect(() => {
     void loadElements();
     void loadMessages();
+    void loadPolls();
     const ch = supabase
       .channel(`room:${sessionId}`)
       .on(
@@ -229,10 +269,20 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
         { event: "INSERT", schema: "public", table: "messages", filter: `session_id=eq.${sessionId}` },
         (payload) => {
           const m = payload.new as Msg;
-          if (["chat", "voice", "ai_mediator", "system"].includes(m.kind)) {
+          if (["chat", "voice", "ai_mediator", "system", "anon_note"].includes(m.kind)) {
             setMessages((prev) => [...prev, m]);
           }
         },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "polls", filter: `session_id=eq.${sessionId}` },
+        () => void loadPolls(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "vote_responses" },
+        () => void loadPolls(),
       )
       .subscribe();
     return () => {
@@ -240,6 +290,21 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
+
+  async function votePoll(pollId: string, optionId: string) {
+    if (!user) return;
+    const existing = votes.find((v) => v.poll_id === pollId && v.user_id === user.id);
+    if (existing) {
+      await supabase.from("vote_responses").update({ option_id: optionId }).eq("poll_id", pollId).eq("user_id", user.id);
+    } else {
+      await supabase.from("vote_responses").insert({ poll_id: pollId, user_id: user.id, option_id: optionId });
+    }
+    await loadPolls();
+  }
+
+  async function closePoll(p: Poll) {
+    await supabase.from("polls").update({ status: "closed" }).eq("id", p.id);
+  }
 
   // ---------- Unified feed ----------
   const feed: FeedItem[] = useMemo(() => {
@@ -261,10 +326,12 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
       const tag: FeedItem["tag"] =
         m.kind === "ai_mediator" ? "mediator" :
         m.kind === "system" ? "system" :
-        m.kind === "voice" ? "voice" : "chat";
+        m.kind === "voice" ? "voice" :
+        m.kind === "anon_note" ? "whisper" : "chat";
       const author =
         tag === "mediator" ? "Mediator" :
         tag === "system" ? "system" :
+        tag === "whisper" ? "Anonymous" :
         nameMap[m.user_id ?? ""] ?? "Someone";
       return {
         id: `m-${m.id}`,
@@ -272,12 +339,22 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
         author,
         body: m.content,
         tag,
-        mine: m.user_id === user?.id,
+        mine: tag === "whisper" ? false : m.user_id === user?.id,
       };
     });
 
-    return [...intros, ...msgs].sort((a, b) => a.ts.localeCompare(b.ts));
-  }, [elements, messages, nameMap, user?.id]);
+    const pollItems: FeedItem[] = polls.map((p) => ({
+      id: `p-${p.id}`,
+      ts: p.created_at,
+      author: nameMap[p.created_by ?? ""] ?? "Someone",
+      body: p.question,
+      tag: "poll",
+      mine: p.created_by === user?.id,
+      poll: p,
+    }));
+
+    return [...intros, ...msgs, ...pollItems].sort((a, b) => a.ts.localeCompare(b.ts));
+  }, [elements, messages, polls, nameMap, user?.id]);
 
   useEffect(() => {
     feedEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -305,8 +382,8 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   async function sendComposer() {
     if (!user || !composer.trim()) return;
     const body = composer.trim();
-    setComposer("");
     if (composerMode === "intro") {
+      setComposer("");
       await supabase.from("whiteboard_elements").insert({
         session_id: sessionId,
         type: "intro",
@@ -316,7 +393,34 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
         source: "user",
       });
       setRoleText("");
+    } else if (composerMode === "whisper") {
+      setComposer("");
+      await supabase.from("messages").insert({
+        session_id: sessionId,
+        user_id: user.id,
+        content: body,
+        kind: "anon_note",
+        is_anonymous: true,
+      });
+    } else if (composerMode === "poll") {
+      const opts = pollOptionsText.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 6);
+      if (opts.length < 2) {
+        toast.error("Add at least 2 options (one per line)");
+        return;
+      }
+      setComposer("");
+      const options: PollOption[] = opts.map((label, i) => ({ id: `o${i + 1}`, label }));
+      const { error } = await supabase.from("polls").insert({
+        session_id: sessionId,
+        question: body,
+        options,
+        created_by: user.id,
+        status: "open",
+      });
+      if (error) toast.error(error.message);
+      else setPollOptionsText("Yes\nNo");
     } else {
+      setComposer("");
       await supabase.from("messages").insert({
         session_id: sessionId,
         user_id: user.id,
@@ -325,6 +429,7 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
       });
     }
   }
+
 
   function defaultPositionFor(idx: number) {
     const cols = 4;
@@ -536,37 +641,90 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
               Say hi, type a message, or start listening.
             </p>
           )}
-          {feed.map((item) => (
-            <div key={item.id} className={`flex ${item.mine ? "justify-end" : "justify-start"}`}>
-              <div className={`max-w-[85%] rounded-lg border ${item.mine ? "border-border bg-background" : "border-border bg-background"} px-3 py-2`}>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] font-medium text-foreground">{item.author}</span>
-                  <span className={`rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-wider ${TAG_STYLES[item.tag]}`}>
-                    {TAG_LABELS[item.tag]}
-                  </span>
+          {feed.map((item) => {
+            if (item.tag === "poll" && item.poll) {
+              const p = item.poll;
+              const total = votes.filter((v) => v.poll_id === p.id).length || 1;
+              const myVote = votes.find((v) => v.poll_id === p.id && v.user_id === user?.id)?.option_id;
+              const canClose = p.created_by === user?.id && p.status === "open";
+              return (
+                <div key={item.id} className="flex justify-start">
+                  <div className="w-full max-w-[95%] rounded-lg border border-border bg-background px-3 py-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-medium text-foreground">{item.author}</span>
+                      <span className={`rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-wider ${TAG_STYLES.poll}`}>poll</span>
+                      <span className="ml-auto text-[10px] text-muted-foreground">{p.status}</span>
+                    </div>
+                    <p className="mt-0.5 text-[13px] font-medium text-foreground">{p.question}</p>
+                    <div className="mt-2 space-y-1">
+                      {p.options.map((o) => {
+                        const count = votes.filter((v) => v.poll_id === p.id && v.option_id === o.id).length;
+                        const pct = Math.round((count / total) * 100);
+                        const mine = myVote === o.id;
+                        return (
+                          <button
+                            key={o.id}
+                            disabled={p.status === "closed"}
+                            onClick={() => void votePoll(p.id, o.id)}
+                            className={`relative block w-full overflow-hidden rounded-md border px-2 py-1 text-left text-[12px] transition ${mine ? "border-foreground" : "border-border"} ${p.status === "closed" ? "opacity-70" : "hover:border-foreground/60"}`}
+                          >
+                            <div className="absolute inset-y-0 left-0 bg-cyan-500/15" style={{ width: `${pct}%` }} />
+                            <div className="relative flex items-center justify-between">
+                              <span>{mine ? "● " : ""}{o.label}</span>
+                              <span className="text-[10px] text-muted-foreground">{count} · {pct}%</span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {canClose && (
+                      <button
+                        onClick={() => void closePoll(p)}
+                        className="mt-1.5 text-[10px] text-muted-foreground hover:text-foreground"
+                      >
+                        Close poll
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <p className="mt-0.5 text-[13px] leading-snug text-foreground">{item.body}</p>
+              );
+            }
+            return (
+              <div key={item.id} className={`flex ${item.mine ? "justify-end" : "justify-start"}`}>
+                <div className={`max-w-[85%] rounded-lg border border-border bg-background px-3 py-2`}>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-medium text-foreground">{item.author}</span>
+                    <span className={`rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-wider ${TAG_STYLES[item.tag]}`}>
+                      {TAG_LABELS[item.tag]}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-[13px] leading-snug text-foreground">{item.body}</p>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
           <div ref={feedEndRef} />
         </div>
 
         {/* Composer */}
         <div className="space-y-2 border-t border-border px-4 py-3">
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setComposerMode("chat")}
-              className={`rounded-md px-2 py-1 text-[11px] ${composerMode === "chat" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
+          <div className="flex items-center gap-2">
+            <select
+              value={composerMode}
+              onChange={(e) => setComposerMode(e.target.value as typeof composerMode)}
+              className="h-7 rounded-md border border-border bg-background px-2 text-[11px] text-foreground outline-none"
             >
-              Chat
-            </button>
-            <button
-              onClick={() => setComposerMode("intro")}
-              className={`rounded-md px-2 py-1 text-[11px] ${composerMode === "intro" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              Intro
-            </button>
+              <option value="chat">💬 Chat</option>
+              <option value="intro">👋 Intro</option>
+              <option value="whisper">🤫 Whisper (anonymous)</option>
+              <option value="poll">📊 Poll</option>
+            </select>
+            <span className="text-[10px] text-muted-foreground">
+              {composerMode === "whisper" && "Nobody sees who sent it."}
+              {composerMode === "intro" && "Posted as your intro."}
+              {composerMode === "poll" && "Question + options below."}
+              {composerMode === "chat" && "Message the room."}
+            </span>
           </div>
           {composerMode === "intro" && (
             <Input
@@ -574,6 +732,15 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
               onChange={(e) => setRoleText(e.target.value)}
               placeholder="Your role (optional)"
               className="h-8 rounded-md text-xs"
+            />
+          )}
+          {composerMode === "poll" && (
+            <textarea
+              value={pollOptionsText}
+              onChange={(e) => setPollOptionsText(e.target.value)}
+              placeholder="One option per line"
+              rows={3}
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs outline-none"
             />
           )}
           <div className="flex gap-2">
@@ -586,10 +753,17 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
                   void sendComposer();
                 }
               }}
-              placeholder={composerMode === "intro" ? "Hi, I'm here to help with…" : "Message the room…"}
+              placeholder={
+                composerMode === "intro" ? "Hi, I'm here to help with…" :
+                composerMode === "whisper" ? "Whisper an idea anonymously…" :
+                composerMode === "poll" ? "Ask a question…" :
+                "Message the room…"
+              }
               className="h-9 rounded-md text-sm"
             />
-            <Button onClick={sendComposer} size="sm" className="h-9 rounded-md">Send</Button>
+            <Button onClick={sendComposer} size="sm" className="h-9 rounded-md">
+              {composerMode === "poll" ? "Post" : "Send"}
+            </Button>
           </div>
         </div>
       </section>

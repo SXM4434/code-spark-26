@@ -5,10 +5,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { AppHeader } from "@/components/AppHeader";
 import { Mascot } from "@/components/Mascot";
 
-import { NotesPanel } from "@/components/workspace/NotesPanel";
 import { ParticipantsList } from "@/components/workspace/ParticipantsList";
 import { VoiceGreeting } from "@/components/workspace/VoiceGreeting";
-import { WhiteboardPanel } from "@/components/workspace/WhiteboardPanel";
 import { PollsPanel } from "@/components/workspace/PollsPanel";
 import { MediatorStrip } from "@/components/workspace/MediatorStrip";
 import { MeetingRoomPanel } from "@/components/workspace/MeetingRoomPanel";
@@ -34,15 +32,12 @@ const DEMO_LINES = [
   "Love that. Lower friction. We could measure conversion in a week.",
 ];
 
-type Tab = "room" | "notes" | "board" | "polls";
-
 function Workspace() {
   const { sessionId } = Route.useParams();
   const { user } = useAuth();
   const [session, setSession] = useState<Session | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [greeted, setGreeted] = useState(false);
-  const [tab, setTab] = useState<Tab>("room");
   const [wrapping, setWrapping] = useState(false);
 
   useEffect(() => {
@@ -145,13 +140,6 @@ function Workspace() {
     );
   }
 
-  const tabs: Array<{ id: Tab; label: string; icon: string }> = [
-    { id: "room", label: "Room", icon: "🪑" },
-    { id: "notes", label: "Whispers", icon: "🤫" },
-    { id: "board", label: "Whiteboard", icon: "🎨" },
-    { id: "polls", label: "Polls", icon: "📊" },
-  ];
-
   return (
     <div className="min-h-screen bg-background">
       <AppHeader />
@@ -188,29 +176,10 @@ function Workspace() {
 
         <div className="mt-5 grid gap-4 lg:grid-cols-[260px_1fr]">
           <ParticipantsList participants={participants} />
-          <div className="flex h-[70vh] flex-col">
-            <div className="flex flex-wrap gap-2">
-              {tabs.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setTab(t.id)}
-                  className={`doodle-btn rounded-full px-4 py-1.5 font-display text-sm ${tab === t.id ? "bg-primary text-primary-foreground" : "bg-card"}`}
-                >
-                  <span className="mr-1">{t.icon}</span>
-                  {t.label}
-                </button>
-              ))}
-            </div>
-            <div className="mt-3 flex-1 min-h-0">
-              {tab === "room" && (
-                <ClientOnly fallback={<div className="h-full" />}>
-                  <MeetingRoomPanel sessionId={sessionId} participants={participants} nameMap={nameMap} />
-                </ClientOnly>
-              )}
-              {tab === "notes" && <NotesPanel sessionId={sessionId} />}
-              {tab === "board" && <WhiteboardPanel sessionId={sessionId} />}
-              {tab === "polls" && <PollsPanel sessionId={sessionId} />}
-            </div>
+          <div className="h-[78vh] min-h-0">
+            <ClientOnly fallback={<div className="h-full" />}>
+              <MeetingRoomPanel sessionId={sessionId} participants={participants} nameMap={nameMap} />
+            </ClientOnly>
           </div>
         </div>
       </main>
