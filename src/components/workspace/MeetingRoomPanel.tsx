@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useScribe } from "@elevenlabs/react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { Mascot } from "@/components/Mascot";
