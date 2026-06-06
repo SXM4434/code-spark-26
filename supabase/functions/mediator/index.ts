@@ -1,4 +1,6 @@
-// Cartoonist AI mediator — surfaces overlooked ideas, drops stickies on the board.
+// Cartoonist AI mediator — two modes:
+//  - default: drops a short mediator note + stickies (only when explicitly asked)
+//  - mode: "flow": returns a process-flow JSON of steps + connections WITHOUT writing chat
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
@@ -15,10 +17,21 @@ You quietly listen, then chime in to:
 
 Be brief. Sound human, never corporate. One short paragraph (<=60 words) plus 1-3 short sticky-note ideas that capture the gist of what people are saying or proposing. Stickies are <=8 words each.`;
 
+const FLOW_SYSTEM = `You are sketching a live PROCESS FLOW DIAGRAM from a team's conversation.
+
+Listen to what they're actually building or describing and turn it into a clean, sequential process flow — like a flowchart someone would draw on a whiteboard. Focus on what matters; ignore small talk.
+
+Rules:
+- 4-8 steps, each 2-6 words, action-oriented (e.g. "User signs up", "Send verify email", "Pick plan").
+- Steps must flow in order. Edges describe transitions (e.g. "if free", "after payment", "on error").
+- Keep it concrete and visual — what HAPPENS, not what people said.
+- If the conversation hasn't converged, draw the best current understanding.`;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
   try {
-    const { session_id } = await req.json();
+    const body = await req.json();
+    const { session_id, mode } = body ?? {};
     if (!session_id) return j({ error: "session_id required" }, 400);
 
     const supabase = createClient(
@@ -26,7 +39,81 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    // Pull recent messages + participants for context.
+    const apiKey = Deno.env.get("LOVABLE_API_KEY");
+    if (!apiKey) return j({ error: "LOVABLE_API_KEY missing" }, 500);
+
+    // ---------- FLOW MODE: return JSON steps, do NOT write chat ----------
+    if (mode === "flow") {
+      const prompt: string = typeof body.prompt === "string" ? body.prompt : "";
+      const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "google/gemini-3-flash-preview",
+          messages: [
+            { role: "system", content: FLOW_SYSTEM },
+            { role: "user", content: prompt || "No conversation yet." },
+          ],
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "process_flow",
+                description: "Sequential process-flow diagram of the team's conversation",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    steps: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          id: { type: "string", description: "Short stable id like s1, s2" },
+                          label: { type: "string", description: "2-6 word step label" },
+                          kind: { type: "string", enum: ["start", "action", "decision", "end"] },
+                        },
+                        required: ["id", "label", "kind"],
+                        additionalProperties: false,
+                      },
+                    },
+                    edges: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          from: { type: "string" },
+                          to: { type: "string" },
+                          label: { type: "string", description: "Optional short transition label" },
+                        },
+                        required: ["from", "to"],
+                        additionalProperties: false,
+                      },
+                    },
+                  },
+                  required: ["steps", "edges"],
+                  additionalProperties: false,
+                },
+              },
+            },
+          ],
+          tool_choice: { type: "function", function: { name: "process_flow" } },
+        }),
+      });
+      if (!aiResp.ok) {
+        const text = await aiResp.text();
+        console.error("flow AI error", aiResp.status, text);
+        if (aiResp.status === 429) return j({ error: "Rate limited" }, 429);
+        if (aiResp.status === 402) return j({ error: "Out of AI credits" }, 402);
+        return j({ error: "AI failed" }, 500);
+      }
+      const aiData = await aiResp.json();
+      const call = aiData.choices?.[0]?.message?.tool_calls?.[0];
+      if (!call) return j({ error: "no tool call" }, 500);
+      const parsed = JSON.parse(call.function.arguments);
+      return j({ ok: true, flow: parsed });
+    }
+
+    // ---------- DEFAULT MEDIATOR MODE (only when explicitly asked) ----------
     const { data: msgs } = await supabase
       .from("messages")
       .select("id,user_id,content,kind,is_anonymous,created_at")
@@ -56,9 +143,6 @@ Deno.serve(async (req) => {
         return `${tag} ${who}: ${m.content}`;
       })
       .join("\n");
-
-    const apiKey = Deno.env.get("LOVABLE_API_KEY");
-    if (!apiKey) return j({ error: "LOVABLE_API_KEY missing" }, 500);
 
     const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",

@@ -16,7 +16,16 @@ type Participant = {
 type WBElement = {
   id: string;
   type: string;
-  data: { text?: string; author?: string; role?: string };
+  data: {
+    text?: string;
+    author?: string;
+    role?: string;
+    stepId?: string;
+    kind?: string;
+    from?: string;
+    to?: string;
+    label?: string | null;
+  };
   position: { x?: number; y?: number } | null;
   created_at: string;
   created_by: string | null;
@@ -212,7 +221,7 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
       .from("whiteboard_elements")
       .select("id,type,data,position,created_at,created_by,source")
       .eq("session_id", sessionId)
-      .in("type", ["intro", "flow_step"])
+      .in("type", ["intro", "flow_step", "flow_edge"])
       .order("created_at", { ascending: true });
     setElements((data ?? []) as WBElement[]);
   }
@@ -222,10 +231,11 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
       .from("messages")
       .select("id,user_id,content,kind,created_at,is_anonymous")
       .eq("session_id", sessionId)
-      .in("kind", ["chat", "voice", "ai_mediator", "system", "anon_note"])
+      .in("kind", ["chat", "voice", "system", "anon_note"])
       .order("created_at", { ascending: true });
     setMessages((data ?? []) as Msg[]);
   }
+
 
   async function loadPolls() {
     const { data } = await supabase
@@ -269,7 +279,7 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
         { event: "INSERT", schema: "public", table: "messages", filter: `session_id=eq.${sessionId}` },
         (payload) => {
           const m = payload.new as Msg;
-          if (["chat", "voice", "ai_mediator", "system", "anon_note"].includes(m.kind)) {
+          if (["chat", "voice", "system", "anon_note"].includes(m.kind)) {
             setMessages((prev) => [...prev, m]);
           }
         },
@@ -460,6 +470,12 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
     await supabase.from("whiteboard_elements").update({ position: pos }).eq("id", id);
   }
 
+  function flowLayoutFor(idx: number) {
+    const cols = 4;
+    const gx = 60, gy = 80, sx = 240, sy = 150;
+    return { x: gx + (idx % cols) * sx, y: gy + Math.floor(idx / cols) * sy };
+  }
+
   async function suggestFlow(silent = false) {
     if (!user) return;
     if (!silent) setSuggesting(true);
@@ -489,36 +505,54 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
       const { data, error } = await supabase.functions.invoke("mediator", {
         body: {
           session_id: sessionId,
-          prompt: `You are sketching a live user flow that evolves as a team talks. Based on the intros and chat, return ONLY a JSON array of 4-7 short step strings (max 8 words each) describing the user journey of what they're building. No prose.\n\nIntros:\n${introCtx}\n\nConversation:\n${chatCtx}`,
           mode: "flow",
+          prompt: `Sketch the process flow being discussed.\n\nIntros:\n${introCtx}\n\nConversation:\n${chatCtx}`,
         },
       });
       if (error) throw error;
-      const raw = (data?.text ?? data?.response ?? "").toString();
-      const match = raw.match(/\[[\s\S]*\]/);
-      const steps: string[] = match ? JSON.parse(match[0]) : [];
+      const flow = data?.flow as
+        | { steps?: Array<{ id: string; label: string; kind?: string }>; edges?: Array<{ from: string; to: string; label?: string }> }
+        | undefined;
+      const steps = flow?.steps ?? [];
+      const edges = flow?.edges ?? [];
       if (steps.length === 0) return;
 
+      // Clear previous AI-generated flow + edges
       const { data: existingAi } = await supabase
         .from("whiteboard_elements")
         .select("id")
         .eq("session_id", sessionId)
-        .eq("type", "flow_step")
+        .in("type", ["flow_step", "flow_edge"])
         .eq("source", "ai");
       if (existingAi?.length) {
         await supabase.from("whiteboard_elements").delete().in("id", existingAi.map((r) => r.id));
       }
-      const existingUserFlow = elements.filter((e) => e.type === "flow_step" && e.source !== "ai").length;
+
+      // Preserve any user-placed AI nodes' positions by stepId if they had one
       for (let i = 0; i < Math.min(steps.length, 8); i++) {
+        const s = steps[i];
         await supabase.from("whiteboard_elements").insert({
           session_id: sessionId,
           type: "flow_step",
-          data: { text: steps[i], author: "Mediator" },
-          position: defaultPositionFor(existingUserFlow + i),
+          data: { text: s.label, author: "Mediator", stepId: s.id, kind: s.kind ?? "action" },
+          position: flowLayoutFor(i),
           created_by: user.id,
           source: "ai",
         });
       }
+
+      if (edges.length) {
+        const edgeRows = edges.slice(0, 12).map((e) => ({
+          session_id: sessionId,
+          type: "flow_edge",
+          data: { from: e.from, to: e.to, label: e.label ?? null },
+          position: { x: 0, y: 0 },
+          created_by: user.id,
+          source: "ai",
+        }));
+        await supabase.from("whiteboard_elements").insert(edgeRows);
+      }
+
       if (!silent) toast.success(`Sketched ${steps.length} steps`);
     } catch (e) {
       if (!silent) toast.error(e instanceof Error ? e.message : "Couldn't sketch the flow");
@@ -528,6 +562,22 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
   }
 
   const flow = elements.filter((e) => e.type === "flow_step");
+  const flowEdges = elements.filter((e) => e.type === "flow_edge");
+
+  // Build map: stepId -> node center, for arrow routing
+  function nodeCenterByStepId(): Record<string, { cx: number; cy: number }> {
+    const out: Record<string, { cx: number; cy: number }> = {};
+    flow.forEach((el, idx) => {
+      const stepId = el.data.stepId;
+      if (!stepId) return;
+      const fb = flowLayoutFor(idx);
+      const x = el.position?.x ?? fb.x;
+      const y = el.position?.y ?? fb.y;
+      out[stepId] = { cx: x + NODE_W / 2, cy: y + NODE_H / 2 };
+    });
+    return out;
+  }
+
 
   // ---------- Canvas drag ----------
   function NodeCard({ el, idx }: { el: WBElement; idx: number }) {
@@ -616,19 +666,25 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
           </div>
         </header>
 
-        {/* Listen bar */}
+        {/* Push-to-talk bar — record only while a person is actively speaking */}
         <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2.5">
           <div className="flex items-center gap-2">
             <span className={`inline-block h-2 w-2 rounded-full ${listening ? "animate-pulse bg-emerald-500" : "bg-muted-foreground/30"}`} />
             <span className="text-xs text-foreground">
-              {listening ? `Listening · ${mmss(elapsed)}` : "Live transcription"}
+              {listening ? `Speaking · ${mmss(elapsed)}` : "Hold to speak"}
             </span>
           </div>
-          {!listening ? (
-            <Button onClick={startListening} size="sm" variant="outline" className="h-7 rounded-md text-xs">Start</Button>
-          ) : (
-            <Button onClick={stopListening} size="sm" variant="outline" className="h-7 rounded-md text-xs">Stop</Button>
-          )}
+          <Button
+            onPointerDown={(e) => { e.preventDefault(); if (!listening) void startListening(); }}
+            onPointerUp={() => { if (listening) stopListening(); }}
+            onPointerLeave={() => { if (listening) stopListening(); }}
+            onPointerCancel={() => { if (listening) stopListening(); }}
+            size="sm"
+            variant={listening ? "default" : "outline"}
+            className="h-7 select-none rounded-md text-xs"
+          >
+            {listening ? "● Recording — release to stop" : "🎙 Hold to speak"}
+          </Button>
         </div>
         {listening && liveText && (
           <p className="border-b border-border px-4 py-2 text-xs italic text-muted-foreground">{liveText}</p>
@@ -820,8 +876,72 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
             {flow.map((el, idx) => (
               <NodeCard key={el.id} el={el} idx={idx} />
             ))}
+            {/* Arrows */}
+            {(() => {
+              const centers = nodeCenterByStepId();
+              return (
+                <svg
+                  className="pointer-events-none absolute inset-0"
+                  width={CANVAS_W}
+                  height={CANVAS_H}
+                >
+                  <defs>
+                    <marker
+                      id="flow-arrow"
+                      viewBox="0 0 10 10"
+                      refX="9"
+                      refY="5"
+                      markerWidth="6"
+                      markerHeight="6"
+                      orient="auto-start-reverse"
+                    >
+                      <path d="M0,0 L10,5 L0,10 z" fill="hsl(var(--muted-foreground))" />
+                    </marker>
+                  </defs>
+                  {flowEdges.map((e) => {
+                    const a = e.data.from ? centers[e.data.from] : undefined;
+                    const b = e.data.to ? centers[e.data.to] : undefined;
+                    if (!a || !b) return null;
+                    const dx = b.cx - a.cx;
+                    const dy = b.cy - a.cy;
+                    const len = Math.hypot(dx, dy) || 1;
+                    const trim = NODE_W / 2 - 8;
+                    const sx = a.cx + (dx / len) * trim;
+                    const sy = a.cy + (dy / len) * (NODE_H / 2 - 4);
+                    const tx = b.cx - (dx / len) * trim;
+                    const ty = b.cy - (dy / len) * (NODE_H / 2 - 4);
+                    const mx = (sx + tx) / 2;
+                    const my = (sy + ty) / 2;
+                    return (
+                      <g key={e.id}>
+                        <path
+                          d={`M ${sx} ${sy} Q ${mx} ${my - 12} ${tx} ${ty}`}
+                          fill="none"
+                          stroke="hsl(var(--muted-foreground))"
+                          strokeWidth={1.5}
+                          markerEnd="url(#flow-arrow)"
+                          opacity={0.7}
+                        />
+                        {e.data.label && (
+                          <text
+                            x={mx}
+                            y={my - 16}
+                            textAnchor="middle"
+                            className="fill-muted-foreground"
+                            style={{ fontSize: 10 }}
+                          >
+                            {e.data.label}
+                          </text>
+                        )}
+                      </g>
+                    );
+                  })}
+                </svg>
+              );
+            })()}
           </div>
         </div>
+
 
         <div className="flex gap-2 border-t border-border px-4 py-3">
           <Input
