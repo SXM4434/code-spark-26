@@ -181,7 +181,7 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
     introsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [elements.length]);
 
-  // Auto-rebuild flow as the conversation evolves
+  // Auto-rebuild flow as the conversation evolves — sketch immediately, no waiting
   useEffect(() => {
     if (!autoFlow) return;
     const introCount = elements.filter((e) => e.type === "intro").length;
@@ -189,6 +189,7 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
     const sig = `${introCount}:${chatBeat}`;
     if (sig === lastSigRef.current) return;
     if (flowDebounceRef.current) clearTimeout(flowDebounceRef.current);
+    // Tiny debounce just to coalesce rapid transcript chunks; feels live
     flowDebounceRef.current = window.setTimeout(async () => {
       lastSigRef.current = sig;
       setAutoBusy(true);
@@ -197,7 +198,7 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
       } finally {
         setAutoBusy(false);
       }
-    }, 8000);
+    }, 800);
     return () => {
       if (flowDebounceRef.current) clearTimeout(flowDebounceRef.current);
     };
