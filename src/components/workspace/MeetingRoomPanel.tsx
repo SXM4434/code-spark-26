@@ -221,7 +221,7 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
       .from("whiteboard_elements")
       .select("id,type,data,position,created_at,created_by,source")
       .eq("session_id", sessionId)
-      .in("type", ["intro", "flow_step"])
+      .in("type", ["intro", "flow_step", "flow_edge"])
       .order("created_at", { ascending: true });
     setElements((data ?? []) as WBElement[]);
   }
