@@ -205,7 +205,7 @@ function Workspace() {
             <div className="mt-3 flex-1 min-h-0">
               {tab === "room" && (
                 <ClientOnly fallback={<div className="h-full" />}>
-                  {() => <MeetingRoomPanel sessionId={sessionId} participants={participants} nameMap={nameMap} />}
+                  <MeetingRoomPanel sessionId={sessionId} participants={participants} nameMap={nameMap} />
                 </ClientOnly>
               )}
               {tab === "chat" && <ChatPanel sessionId={sessionId} nameMap={nameMap} />}
