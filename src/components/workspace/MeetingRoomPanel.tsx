@@ -461,6 +461,12 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
     await supabase.from("whiteboard_elements").update({ position: pos }).eq("id", id);
   }
 
+  function flowLayoutFor(idx: number) {
+    const cols = 4;
+    const gx = 60, gy = 80, sx = 240, sy = 150;
+    return { x: gx + (idx % cols) * sx, y: gy + Math.floor(idx / cols) * sy };
+  }
+
   async function suggestFlow(silent = false) {
     if (!user) return;
     if (!silent) setSuggesting(true);
@@ -490,36 +496,54 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
       const { data, error } = await supabase.functions.invoke("mediator", {
         body: {
           session_id: sessionId,
-          prompt: `You are sketching a live user flow that evolves as a team talks. Based on the intros and chat, return ONLY a JSON array of 4-7 short step strings (max 8 words each) describing the user journey of what they're building. No prose.\n\nIntros:\n${introCtx}\n\nConversation:\n${chatCtx}`,
           mode: "flow",
+          prompt: `Sketch the process flow being discussed.\n\nIntros:\n${introCtx}\n\nConversation:\n${chatCtx}`,
         },
       });
       if (error) throw error;
-      const raw = (data?.text ?? data?.response ?? "").toString();
-      const match = raw.match(/\[[\s\S]*\]/);
-      const steps: string[] = match ? JSON.parse(match[0]) : [];
+      const flow = data?.flow as
+        | { steps?: Array<{ id: string; label: string; kind?: string }>; edges?: Array<{ from: string; to: string; label?: string }> }
+        | undefined;
+      const steps = flow?.steps ?? [];
+      const edges = flow?.edges ?? [];
       if (steps.length === 0) return;
 
+      // Clear previous AI-generated flow + edges
       const { data: existingAi } = await supabase
         .from("whiteboard_elements")
         .select("id")
         .eq("session_id", sessionId)
-        .eq("type", "flow_step")
+        .in("type", ["flow_step", "flow_edge"])
         .eq("source", "ai");
       if (existingAi?.length) {
         await supabase.from("whiteboard_elements").delete().in("id", existingAi.map((r) => r.id));
       }
-      const existingUserFlow = elements.filter((e) => e.type === "flow_step" && e.source !== "ai").length;
+
+      // Preserve any user-placed AI nodes' positions by stepId if they had one
       for (let i = 0; i < Math.min(steps.length, 8); i++) {
+        const s = steps[i];
         await supabase.from("whiteboard_elements").insert({
           session_id: sessionId,
           type: "flow_step",
-          data: { text: steps[i], author: "Mediator" },
-          position: defaultPositionFor(existingUserFlow + i),
+          data: { text: s.label, author: "Mediator", stepId: s.id, kind: s.kind ?? "action" },
+          position: flowLayoutFor(i),
           created_by: user.id,
           source: "ai",
         });
       }
+
+      if (edges.length) {
+        const edgeRows = edges.slice(0, 12).map((e) => ({
+          session_id: sessionId,
+          type: "flow_edge",
+          data: { from: e.from, to: e.to, label: e.label ?? null },
+          position: { x: 0, y: 0 },
+          created_by: user.id,
+          source: "ai",
+        }));
+        await supabase.from("whiteboard_elements").insert(edgeRows);
+      }
+
       if (!silent) toast.success(`Sketched ${steps.length} steps`);
     } catch (e) {
       if (!silent) toast.error(e instanceof Error ? e.message : "Couldn't sketch the flow");
@@ -527,6 +551,7 @@ export function MeetingRoomPanel({ sessionId, participants, nameMap }: Props) {
       if (!silent) setSuggesting(false);
     }
   }
+
 
   const flow = elements.filter((e) => e.type === "flow_step");
 
