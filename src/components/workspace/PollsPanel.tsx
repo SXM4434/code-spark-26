@@ -43,8 +43,8 @@ export function PollsPanel({ sessionId }: { sessionId: string }) {
       .select("*")
       .eq("session_id", sessionId)
       .order("created_at", { ascending: false });
-    setPolls((data as Poll[]) ?? []);
-    await loadVotes((data as Poll[]) ?? []);
+    setPolls(((data as unknown) as Poll[]) ?? []);
+    await loadVotes(((data as unknown) as Poll[]) ?? []);
   }
   async function loadVotes(ps?: Poll[]) {
     const list = ps ?? polls;

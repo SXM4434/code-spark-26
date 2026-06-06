@@ -35,7 +35,7 @@ export function WhiteboardPanel({ sessionId }: { sessionId: string }) {
         .select("*")
         .eq("session_id", sessionId)
         .order("created_at", { ascending: true });
-      setEls((data as Element[]) ?? []);
+      setEls(((data as unknown) as Element[]) ?? []);
     })();
     const ch = supabase
       .channel(`wb:${sessionId}`)
