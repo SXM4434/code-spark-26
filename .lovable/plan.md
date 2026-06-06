@@ -1,50 +1,44 @@
-# Cartoonist — Build Plan
+# Cartoonist Intro Deck — 10 slides, PPTX
 
-A real-time AI-mediated team collaboration platform. Building in 4 phases as specified in your brief. After each phase we verify it works before moving on.
+A standalone, downloadable PowerPoint introducing Cartoonist. Built as an artifact (not part of the app routes), delivered to you as a `.pptx` file you can open, edit, and present.
 
-## Phase 1 — Foundation (start here)
-1. **Enable Lovable Cloud** (Supabase: auth, DB, storage, realtime, edge functions).
-2. **Design system**: warm cream/coral/teal palette, Fredoka + Inter, sticker-style shadcn variants, hand-drawn SVG mascot component, doodle accents.
-3. **Database schema + RLS** for all tables: `profiles`, `sessions`, `session_participants`, `messages`, `whiteboard_elements`, `generated_artifacts`, `polls`, `vote_responses`, `action_items`, `uploads`. Realtime enabled on the collaborative ones.
-4. **Auth** (email/password + magic link) with `/auth` route.
-5. **Profile onboarding** — personality type cards + strengths chips + name/avatar.
-6. **Dashboard** — Start session / Join by code / past sessions grid with mascot empty state.
-7. **Create session wizard** — type → mode → desired outputs → join code.
-8. **Lobby** — participants join, set per-session personality, optional intro, host starts.
+## Visual direction
 
-✅ **Checkpoint**: sign up, onboard, create + join a session by code, land in lobby.
+Match the app's playful "sticker" aesthetic:
+- Warm cream background, ink-black text, primary coral/orange + soft accent yellow + sage secondary
+- Display headings (bold, slightly oversized), clean sans body
+- Rounded "sticker" cards with subtle borders, a little rotation for personality
+- Cartoonist mascot motif on title + closing slides
 
-## Phase 2 — Live collaboration
-- Session Workspace shell (participants rail / chat / whiteboard placeholder / mediator placeholder / top bar).
-- Realtime chat + presence via Supabase Realtime.
-- Web Speech API voice transcription → writes `kind=voice` messages.
-- Anonymous notes (`is_anonymous=true`).
-- Personality badges + live presence dots.
+## Slide outline (10)
 
-✅ **Checkpoint**: two browsers in one session see each other's chat, voice, and anon notes live.
+1. **Title** — "Cartoonist" + tagline "Teams that draw it out, together." + mascot
+2. **The problem** — Meetings overflow with voices, but the quiet ideas, structure, and decisions get lost
+3. **The idea** — An AI mediator that listens, draws, and ships the conversation
+4. **Design logic** — Three principles: *Hear everyone · Make it visible · Leave with something shippable*
+5. **How it works** — Flow: Voice hello → Live chat + whisper notes → AI mediator + live whiteboard → Generated docs
+6. **Inside a session** — Annotated screenshot/mock of the workspace (chat, notes, participants, mascot)
+7. **What you leave with** — PRD, user journey, timeline, decisions, action items, team alignment view
+8. **Why it's different** — Personality-aware, anonymous whispers, live visual, playful tone — not another transcript bot
+9. **The team — by strength** — Grid of teammates with their superpower (name, role, strength tag). Placeholder names you fill in or tell me to pre-fill
+10. **Closing / Try it** — Mascot wave, call to action, join code placeholder
 
-## Phase 3 — AI mediator + whiteboard
-- React Flow canvas with draggable user stickies (writes `whiteboard_elements`).
-- Edge function `mediator-monitor` (Lovable AI / Gemini) — surfaces quiet ideas, agreements, disagreements, talking points.
-- Edge function `live-visual` — emits React Flow nodes/edges from the conversation.
-- Mediator panel feed with reacting mascot.
+## Team slide — what I need from you
 
-✅ **Checkpoint**: AI cards appear as conversation flows; whiteboard updates live.
+For slide 9 I'll insert 4 placeholder cards (Name · Role · Strength) unless you give me the real list now. Strengths use single-word tags like "Systems thinker", "Storyteller", "Builder", "Researcher".
 
-## Phase 4 — Decisions & documents
-- Polls + live vote tallies.
-- Edge function `generate-artifact` for: summary, PRD, user journey, product flow, timeline, problem statement, decisions, action items, team alignment.
-- Documents view (tabs, editable, Markdown export).
-- Action Item Kanban (Todo / Doing / Done).
-- Team Alignment view from personalities + strengths.
-- Uploads & Notes (files + links) feeding context.
+## Technical approach
 
-✅ **Final checkpoint**: full acceptance list from §8 of the brief.
+- Use the bundled `pptx` skill with `pptxgenjs` (Node) to generate the file
+- 16:9, semantic color palette mirroring `src/styles.css` tokens (ink, primary, accent, secondary, highlight, cream bg)
+- Generate at `/mnt/documents/cartoonist-intro.pptx` and deliver via `<presentation-artifact>`
+- QA pass: render to PDF → images → inspect each slide for overflow/contrast/placeholder leftovers → fix → re-verify
+- No changes to the app codebase
 
-## Notes
-- All AI calls go through edge functions using Lovable AI (Gemini). No client-side AI keys.
-- Voice transcription uses the browser's Web Speech API (we'll show a "best in Chrome" hint).
-- RLS on every table from day one.
-- This is a large build — I'll implement Phase 1 in full, then pause for you to try it before starting Phase 2.
+## Out of scope
 
-Ready to start Phase 1?
+- No new routes or in-app slide viewer
+- No PDF export (PPTX only, per your choice)
+- No real team photos (text cards only unless you upload images)
+
+Ready to build when you approve — and let me know if you want me to drop in real team names/strengths for slide 9, or leave placeholders.
