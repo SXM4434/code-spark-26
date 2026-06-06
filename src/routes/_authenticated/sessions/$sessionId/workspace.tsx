@@ -34,7 +34,7 @@ const DEMO_LINES = [
   "Love that. Lower friction. We could measure conversion in a week.",
 ];
 
-type Tab = "chat" | "notes" | "board" | "polls";
+type Tab = "room" | "chat" | "notes" | "board" | "polls";
 
 function Workspace() {
   const { sessionId } = Route.useParams();
@@ -42,7 +42,7 @@ function Workspace() {
   const [session, setSession] = useState<Session | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [greeted, setGreeted] = useState(false);
-  const [tab, setTab] = useState<Tab>("chat");
+  const [tab, setTab] = useState<Tab>("room");
   const [wrapping, setWrapping] = useState(false);
 
   useEffect(() => {
