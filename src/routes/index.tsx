@@ -27,7 +27,7 @@ function Landing() {
             <div className="mt-7 flex flex-wrap gap-3">
               <Link to="/auth">
                 <button className="doodle-btn rounded-full bg-primary px-6 py-3 font-display text-lg font-semibold text-primary-foreground">
-                  Start a session
+                  Try it free — no account needed
                 </button>
               </Link>
               <Link to="/auth">

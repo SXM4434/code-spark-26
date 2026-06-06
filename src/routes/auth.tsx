@@ -68,6 +68,14 @@ function AuthPage() {
     if (result.error) toast.error("Google sign-in failed");
   }
 
+  async function handleSkip() {
+    setBusy(true);
+    const { error } = await supabase.auth.signInAnonymously();
+    setBusy(false);
+    if (error) toast.error(error.message);
+    else toast.success("You're in! Let's draw something.");
+  }
+
   return (
     <div className="min-h-screen bg-background px-4 py-10">
       <div className="mx-auto flex max-w-md flex-col items-center">
@@ -104,6 +112,9 @@ function AuthPage() {
             </Button>
             <Button onClick={handleMagic} disabled={busy} variant="ghost" className="w-full rounded-full font-display">
               Send a magic link
+            </Button>
+            <Button onClick={handleSkip} disabled={busy} variant="ghost" className="w-full rounded-full font-display text-primary hover:text-primary">
+              ✨ Skip account creation — try demo
             </Button>
           </div>
 
