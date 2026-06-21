@@ -10,6 +10,8 @@ import { VoiceGreeting } from "@/components/workspace/VoiceGreeting";
 import { PollsPanel } from "@/components/workspace/PollsPanel";
 import { MediatorStrip } from "@/components/workspace/MediatorStrip";
 import { MeetingRoomPanel } from "@/components/workspace/MeetingRoomPanel";
+import { Canvas } from "@/components/canvas/Canvas";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
@@ -178,7 +180,18 @@ function Workspace() {
           <ParticipantsList participants={participants} />
           <div className="h-[78vh] min-h-0">
             <ClientOnly fallback={<div className="h-full" />}>
-              <MeetingRoomPanel sessionId={sessionId} participants={participants} nameMap={nameMap} />
+              <Tabs defaultValue="canvas" className="flex h-full flex-col">
+                <TabsList className="self-start">
+                  <TabsTrigger value="canvas">🎨 Canvas</TabsTrigger>
+                  <TabsTrigger value="room">💬 Room (legacy)</TabsTrigger>
+                </TabsList>
+                <TabsContent value="canvas" className="mt-2 flex-1 min-h-0 overflow-hidden rounded-md border border-border">
+                  <Canvas sessionId={sessionId} />
+                </TabsContent>
+                <TabsContent value="room" className="mt-2 flex-1 min-h-0">
+                  <MeetingRoomPanel sessionId={sessionId} participants={participants} nameMap={nameMap} />
+                </TabsContent>
+              </Tabs>
             </ClientOnly>
           </div>
         </div>

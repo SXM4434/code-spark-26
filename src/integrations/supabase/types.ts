@@ -58,6 +58,88 @@ export type Database = {
           },
         ]
       }
+      ai_calls: {
+        Row: {
+          agent: string | null
+          cost_usd: number
+          created_at: string
+          id: string
+          input_tokens: number
+          model: string
+          output_tokens: number
+          session_id: string
+        }
+        Insert: {
+          agent?: string | null
+          cost_usd?: number
+          created_at?: string
+          id?: string
+          input_tokens?: number
+          model: string
+          output_tokens?: number
+          session_id: string
+        }
+        Update: {
+          agent?: string | null
+          cost_usd?: number
+          created_at?: string
+          id?: string
+          input_tokens?: number
+          model?: string
+          output_tokens?: number
+          session_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_calls_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      canvas_events: {
+        Row: {
+          actor_id: string | null
+          created_at: string
+          id: string
+          kind: string
+          payload: Json
+          session_id: string
+          shape_id: string | null
+          t_offset_ms: number
+        }
+        Insert: {
+          actor_id?: string | null
+          created_at?: string
+          id?: string
+          kind: string
+          payload?: Json
+          session_id: string
+          shape_id?: string | null
+          t_offset_ms?: number
+        }
+        Update: {
+          actor_id?: string | null
+          created_at?: string
+          id?: string
+          kind?: string
+          payload?: Json
+          session_id?: string
+          shape_id?: string | null
+          t_offset_ms?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "canvas_events_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       generated_artifacts: {
         Row: {
           content: Json
@@ -127,6 +209,41 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "messages_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      migration_errors: {
+        Row: {
+          created_at: string
+          error: string
+          id: string
+          payload: Json | null
+          session_id: string | null
+          source: string
+        }
+        Insert: {
+          created_at?: string
+          error: string
+          id?: string
+          payload?: Json | null
+          session_id?: string | null
+          source: string
+        }
+        Update: {
+          created_at?: string
+          error?: string
+          id?: string
+          payload?: Json | null
+          session_id?: string | null
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "migration_errors_session_id_fkey"
             columns: ["session_id"]
             isOneToOne: false
             referencedRelation: "sessions"
@@ -247,6 +364,7 @@ export type Database = {
           host_id: string
           id: string
           join_code: string
+          meta: Json
           mode: string
           name: string
           status: string
@@ -259,6 +377,7 @@ export type Database = {
           host_id: string
           id?: string
           join_code: string
+          meta?: Json
           mode: string
           name: string
           status?: string
@@ -271,6 +390,7 @@ export type Database = {
           host_id?: string
           id?: string
           join_code?: string
+          meta?: Json
           mode?: string
           name?: string
           status?: string
