@@ -27,7 +27,8 @@ export async function commitOp(
     actor_id: actorId,
     kind,
     shape_id: shapeId,
-    payload,
+    // Supabase Json type is invariant; round-trip through JSON to match.
+    payload: JSON.parse(JSON.stringify(payload)),
     t_offset_ms,
   });
 }
